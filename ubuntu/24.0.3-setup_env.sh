@@ -30,7 +30,7 @@ BF_USER="bf1942_user"
 BF_HOME="/home/${BF_USER}"
 BF_ROOT="${BF_HOME}/bf1942"
 BF_DL_DIR="${BF_ROOT}/downloads"
-INSTALLER_URL="http://137.184.167.47/gf-bf1942_lnxded-1.6-rc2.run"
+INSTALLER_URL="https://files.bf1942.online/server/bf1942-1.6.run"
 SUDOERS_FILE="/etc/sudoers.d/${BF_USER}"
 
 # ------------------------------------------------------------

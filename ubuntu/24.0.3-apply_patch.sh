@@ -24,7 +24,7 @@ echo "[+] Applying Battlefield 1942 1.61 patch ..."
 
 BF_USER="bf1942_user"
 BF_ROOT="/home/${BF_USER}/bf1942"
-PATCH_URL="http://137.184.167.47/patched1.61.tar"
+PATCH_URL="https://files.bf1942.online/server/linux/patched1.61.tar"
 
 # ------------------------------------------------------------
 # 1) Confirm install directory exists

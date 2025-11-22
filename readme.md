@@ -40,6 +40,7 @@ Download the script to your server:
 wget [https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_setup.sh](https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_setup.sh)
 chmod +x setup_bf1942.sh
 sudo ./setup_bf1942.sh
+```
 
 ---
 ## 🧑‍🎨 Author

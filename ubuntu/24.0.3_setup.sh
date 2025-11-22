@@ -20,6 +20,8 @@ set -euo pipefail
 BF_USER="bf1942_user"
 BF_HOME="/home/${BF_USER}"
 BF_ROOT="${BF_HOME}/bf1942"
+# Note: You can change this URL to a custom mirror if needed.
+# If hosting yourself, ensure the tar structure matches the official one.
 SERVER_TAR_URL="https://files.bf1942.online/server/linux/linux-bf1942-server.tar"
 SUDOERS_FILE="/etc/sudoers.d/${BF_USER}"
 SERVICE_FILE="/etc/systemd/system/bf1942.service"
@@ -65,6 +67,7 @@ apt-get install -y --no-install-recommends \
     libx11-6:i386 libncurses6:i386 wget tar
 
 # Install legacy libraries required by the 2003 binaries
+# If you are hosting these on your own server, update the URL/logic here.
 log_info "Fetching and installing legacy Debian libraries..."
 TEMP_DIR=$(mktemp -d)
 pushd "$TEMP_DIR" > /dev/null
@@ -88,10 +91,8 @@ log_success "Dependencies installed."
 # ------------------------------------------------------------
 log_info "Downloading and installing Server files..."
 
-# Download and extract directly to the target directory
-# We strip components if the tar has a top-level folder, but based on request
-# we assume we extract content directly into BF_ROOT.
-wget -qO- "$SERVER_TAR_URL" | tar -x -C "$BF_ROOT"
+# FIX APPLIED HERE: --strip-components=1 removes the top-level folder
+wget -qO- "$SERVER_TAR_URL" | tar -x --strip-components=1 -C "$BF_ROOT"
 
 log_success "Files extracted to ${BF_ROOT}"
 
@@ -107,13 +108,16 @@ if [ -f "bf1942_lnxded.dynamic" ]; then
     ln -sf bf1942_lnxded.dynamic bf1942_lnxded
     log_success "Symlink created: bf1942_lnxded -> bf1942_lnxded.dynamic"
 else
+    # If this fails now, it means the extraction failed completely
     log_warn "bf1942_lnxded.dynamic not found. Check tarball content."
+    exit 1
 fi
 
 # Set executable permissions
 chmod +x start.sh bf1942_lnxded.dynamic bf1942_lnxded.static
 
 # Ensure correct ownership for the entire directory tree
+# (This fixes the root ownership issue you saw in your ls -l output)
 chown -R "${BF_USER}:${BF_USER}" "${BF_HOME}"
 
 # ------------------------------------------------------------
@@ -130,7 +134,6 @@ After=network.target
 Type=simple
 WorkingDirectory=${BF_ROOT}
 Environment=TERM=xterm
-# Ensuring we use the start script which handles environment setup
 ExecStart=/bin/bash ${BF_ROOT}/start.sh +game BF1942 +statusMonitor 1
 Restart=on-failure
 RestartSec=5

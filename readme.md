@@ -42,7 +42,16 @@ wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_
 chmod +x 24.0.3_setup.sh
 sudo ./24.0.3_setup.sh
 ```
+---
+## 🧪 Supported Distributions
 
+| Distro | Status | Notes |
+| :--- | :--- | :--- |
+| **Ubuntu 24.04.3 LTS** | ✅ Tested | Primary tested platform. |
+| **Ubuntu 22.04 LTS** | 📝 TODO | Likely works; may need minor package name adjustments. |
+| **Debian 12 (Bookworm)** | 📝 TODO | Uses the same multiarch structure as Ubuntu. |
+| **Fedora** | 📝 TODO | Requires converting `apt` commands to `dnf`. |
+| **CentOS Stream / RHEL** | 📝 TODO | Requires converting `apt` commands to `yum/dnf`. |
 ---
 ## 🧑‍🎨 Author
 OWLCAT 🔗 https://github.com/hootmeow

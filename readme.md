@@ -37,7 +37,7 @@ The setup script (`setup_bf1942.sh`) contains several configuration variables at
 Download the script to your server:
 
 ```bash
-wget [https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_setup.sh](https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_setup.sh)
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_setup.sh
 chmod +x setup_bf1942.sh
 sudo ./setup_bf1942.sh
 ```

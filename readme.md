@@ -17,7 +17,7 @@ This solution installs the legacy 32-bit Battlefield 1942 dedicated server using
 
 ## ⚙️ Configuration
 
-The setup script (`setup_bf1942.sh`) contains several configuration variables at the top that you can customize before running.
+The setup script contains several configuration variables at the top that you can customize before running.
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
@@ -33,13 +33,14 @@ The setup script (`setup_bf1942.sh`) contains several configuration variables at
 
 > **Prerequisite:** Commands must be run by a user with **sudo** privileges.
 
-### 1️⃣ Download and Run (For Ubuntu Servers, for others distro's select the appropriate install script from the project)
+### 1️⃣ Download and Run
+This install script is for Ubuntu 24.0.3 servers.  For others distro's select the appropriate install script from the project and adjust the file names and links accordingly.
 Download the script to your server:
 
 ```bash
 wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_setup.sh
-chmod +x setup_bf1942.sh
-sudo ./setup_bf1942.sh
+chmod +x 24.0.3_setup.sh
+sudo ./24.0.3_setup.sh
 ```
 
 ---

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-#  Battlefield 1942 Linux Server - All-in-One Setup Script
+#  Battlefield 1942 Linux Server - All-in-One Setup Script (BFSMD Version)
 #
 #  Purpose:
 #    Provision a secure, dedicated environment for BF1942 on modern
 #    Debian/Ubuntu systems. This script handles user creation, dependency
 #    resolution (i386/legacy), and server installation via tarball.
+#    It sets up 'bfsmd' (Battlefield Server Manager Daemon) as the system service.
 #
 #  Target OS: Ubuntu 24.04 LTS (and similar Debian-based distros)
 #
@@ -22,9 +23,9 @@ BF_HOME="/home/${BF_USER}"
 BF_ROOT="${BF_HOME}/bf1942"
 # Note: You can change this URL to a custom mirror if needed.
 # If hosting yourself, ensure the tar structure matches the official one.
-SERVER_TAR_URL="https://files.bf1942.online/server/linux/linux-bf1942-server.tar"
+SERVER_TAR_URL="https://files.bf1942.online/server/linux/linux-bf1942-server-bfsm.tar"
 SUDOERS_FILE="/etc/sudoers.d/${BF_USER}"
-SERVICE_FILE="/etc/systemd/system/bf1942.service"
+SERVICE_FILE="/etc/systemd/system/bfsmd.service"
 
 # Visual helpers
 log_info() { echo -e "\e[34m[INFO]\e[0m $1"; }
@@ -92,6 +93,7 @@ log_success "Dependencies installed."
 log_info "Downloading and installing Server files..."
 
 # Extract the server files, removing the top-level directory from the tarball
+# (Assumes BFSMD files are included in this tarball)
 wget -qO- "$SERVER_TAR_URL" | tar -x --strip-components=1 -C "$BF_ROOT"
 
 log_success "Files extracted to ${BF_ROOT}"
@@ -114,7 +116,8 @@ else
 fi
 
 # Set executable permissions
-chmod +x start.sh bf1942_lnxded.dynamic bf1942_lnxded.static fixinstall.sh
+# Added bfsmd and bfsmd.static as requested
+chmod +x start.sh bf1942_lnxded.dynamic bf1942_lnxded.static fixinstall.sh bfsmd bfsmd.static
 
 # Execute fixinstall.sh
 if [ -f "fixinstall.sh" ]; then 
@@ -129,20 +132,32 @@ fi
 chown -R "${BF_USER}:${BF_USER}" "${BF_HOME}"
 
 # ------------------------------------------------------------
-# 5) Systemd Service Setup
+# 5) Systemd Service Setup (BFSMD)
 # ------------------------------------------------------------
-log_info "Installing Systemd Service..."
+log_info "Installing BFSMD Systemd Service..."
 
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Battlefield 1942 Dedicated Server
+Description=Battlefield 1942 Server Manager Daemon
 After=network.target
 
 [Service]
-Type=simple
+# BFSMD runs as a daemon using the -daemon flag, so we use Type=forking
+Type=forking
 WorkingDirectory=${BF_ROOT}
 Environment=TERM=xterm
-ExecStart=/bin/bash ${BF_ROOT}/start.sh +game BF1942 +statusMonitor 1
+
+# Start command:
+# -path: Path to the game server root
+# -ip:   Bind IP (0.0.0.0 binds to all interfaces)
+# -port: Game port (default 14667)
+# -restart: Auto-restart the server if it crashes
+# -start:   Start the server immediately
+# -nodelay: Skip startup delay
+# -daemon:  Run in background
+ExecStart=${BF_ROOT}/bfsmd -path ${BF_ROOT} -ip 0.0.0.0 -port 14667 -restart -start -nodelay -daemon
+
+# Restart the daemon itself if it fails
 Restart=on-failure
 RestartSec=5
 User=${BF_USER}
@@ -153,8 +168,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable bf1942.service || true
-log_success "Systemd unit created: bf1942.service"
+systemctl enable bfsmd.service || true
+log_success "Systemd unit created: bfsmd.service"
 
 # ------------------------------------------------------------
 # 6) Sudoers Configuration
@@ -162,35 +177,51 @@ log_success "Systemd unit created: bf1942.service"
 log_info "Configuring limited sudo access for service management..."
 
 cat > "$SUDOERS_FILE" <<EOF
-# Battlefield 1942 Server Management
-${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start bf1942.service
-${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop bf1942.service
-${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart bf1942.service
-${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl status bf1942.service
-${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl status bf1942.service -l
-${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u bf1942.service
+# Battlefield 1942 Server Management (BFSMD)
+${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start bfsmd.service
+${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop bfsmd.service
+${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart bfsmd.service
+${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl status bfsmd.service
+${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl status bfsmd.service -l
+${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u bfsmd.service
 EOF
 
 chmod 440 "$SUDOERS_FILE"
 log_success "Sudoers configured."
 
 # ------------------------------------------------------------
-# 7) Final Summary
+# 7) Start Service
+# ------------------------------------------------------------
+log_info "Starting BFSMD Service..."
+systemctl start bfsmd.service
+log_success "Service started successfully."
+
+# ------------------------------------------------------------
+# 8) Final Summary
 # ------------------------------------------------------------
 echo ""
 echo "=================================================="
-echo "   Battlefield 1942 Server Installation Complete"
+echo "   Battlefield 1942 (BFSMD) Installation Complete"
 echo "=================================================="
 echo " Install Location : ${BF_ROOT}"
 echo " Service User     : ${BF_USER}"
-echo ""
-echo " To start the server:"
-echo "   sudo systemctl start bf1942.service"
+echo " Service Status   : RUNNING (Auto-started)"
 echo ""
 echo " To check status:"
-echo "   sudo systemctl status bf1942.service"
+echo "   sudo systemctl status bfsmd.service"
 echo ""
 echo " To manage as ${BF_USER}:"
 echo "   su - ${BF_USER}"
-echo "   sudo systemctl restart bf1942.service"
+echo "   sudo systemctl restart bfsmd.service"
+echo " --------------------------------------------------"
+echo " [WARNING] DEFAULT CONFIGURATION CREDENTIALS"
+echo " --------------------------------------------------"
+echo " The server is running with default manager credentials."
+echo " YOU MUST CHANGE THESE IMMEDIATELY TO SECURE YOUR SERVER."
+echo ""
+echo " Default Username : bf1942"
+echo " Default Password : battlefield"
+echo ""
+echo " Edit 'servermanager.con' and 'useraccess.con' in:"
+echo " ${BF_ROOT}/mods/bf1942/settings/"
 echo "=================================================="

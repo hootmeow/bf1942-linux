@@ -91,7 +91,7 @@ log_success "Dependencies installed."
 # ------------------------------------------------------------
 log_info "Downloading and installing Server files..."
 
-# FIX APPLIED HERE: --strip-components=1 removes the top-level folder
+# Extract the server files, removing the top-level directory from the tarball
 wget -qO- "$SERVER_TAR_URL" | tar -x --strip-components=1 -C "$BF_ROOT"
 
 log_success "Files extracted to ${BF_ROOT}"
@@ -114,10 +114,18 @@ else
 fi
 
 # Set executable permissions
-chmod +x start.sh bf1942_lnxded.dynamic bf1942_lnxded.static
+chmod +x start.sh bf1942_lnxded.dynamic bf1942_lnxded.static fixinstall.sh
+
+# Execute fixinstall.sh
+if [ -f "fixinstall.sh" ]; then 
+    log_info "Executing fixinstall.sh..."
+    ./fixinstall.sh
+    log_success "fixinstall.sh executed."
+else
+    log_warn "fixinstall.sh not found. Skipping execution."
+fi
 
 # Ensure correct ownership for the entire directory tree
-# (This fixes the root ownership issue you saw in your ls -l output)
 chown -R "${BF_USER}:${BF_USER}" "${BF_HOME}"
 
 # ------------------------------------------------------------

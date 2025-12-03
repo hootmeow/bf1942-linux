@@ -57,9 +57,6 @@ sudo ./24.0.3_setup.sh
 ```
 
 ---
-
-![BFSMD Login](images/bfsmd_password.png)
-
 ### 2️⃣ Connect to Server Manager (BFSMD Only)
 If you installed the BFSMD version, open your Battlefield Server Manager client (Windows) and connect using your server's IP address. Use the default credentials below:
 

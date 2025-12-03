@@ -42,7 +42,7 @@ You have two options for installation. **We recommend using the BFSMD version** 
 This version installs the Battlefield Server Manager Daemon, allowing you to manage the server remotely via the Windows client.
 
 ```bash
-wget [https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_bfsmd_setup.sh](https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_bfsmd_setup.sh)
+curl -O https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_bfsmd_setup.sh
 chmod +x 24.0.3_bfsmd_setup.sh
 sudo ./24.0.3_bfsmd_setup.sh
 ```
@@ -51,7 +51,7 @@ sudo ./24.0.3_bfsmd_setup.sh
 This version installs the base dedicated server without the remote manager daemon.
 
 ```bash
-wget [https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_setup.sh](https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_setup.sh)
+curl -# -O https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_setup.sh
 chmod +x 24.0.3_setup.sh
 sudo ./24.0.3_setup.sh
 ```

@@ -92,13 +92,16 @@ For security, do not keep using the default account.
 3.  Ensure you set appropriate permissions for each user.
 
 ![Set Admin Users](images/bfsmd_adminpassword.png)
----
 
+### 🛠️ Applying Patches
+The patches folder contains python scripts to improve various server bugs. Please see individual patch files for addtional details and how to apply.
+
+---
 
 ## 🧩 Server Manager Downloads for Windows
 1. BFRM Version 2.0 - https://files.bf1942.online/server/toolsBFRemoteManager20final-patched.zip
 2. BFRM Version 2.1 (patched) - https://files.bf1942.online/server/tools/BFRemoteManager201-patched.zip
-
+---
 
 ## 🧪 Supported Distributions
 

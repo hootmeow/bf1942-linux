@@ -23,7 +23,7 @@ BF_HOME="/home/${BF_USER}"
 BF_ROOT="${BF_HOME}/bf1942"
 # Note: You can change this URL to a custom mirror if needed.
 # If hosting yourself, ensure the tar structure matches the official one.
-SERVER_TAR_URL="https://files.bf1942.online/server/linux/linux-bf1942-server-bfsm-hitreg.tar"
+SERVER_TAR_URL="https://files.bf1942.online/server/linux/linux-bf1942-server-bfsm.tar"
 SUDOERS_FILE="/etc/sudoers.d/${BF_USER}"
 SERVICE_FILE="/etc/systemd/system/bfsmd.service"
 
@@ -45,7 +45,13 @@ else
     
     echo ""
     log_warn "You must set a password for ${BF_USER} to allow manual login."
-    passwd "$BF_USER"
+    
+    # Catch password failure (e.g. mismatch) and exit with a clear error
+    if ! passwd "$BF_USER"; then
+        echo ""
+        echo -e "\e[31m[ERROR] Password setup failed. Script aborted.\e[0m"
+        exit 1
+    fi
 fi
 
 # Ensure root directory exists
@@ -93,6 +99,7 @@ log_success "Dependencies installed."
 log_info "Downloading and installing Server files..."
 
 # Extract the server files, removing the top-level directory from the tarball
+# (Assumes BFSMD files are included in this tarball)
 wget -qO- "$SERVER_TAR_URL" | tar -x --strip-components=1 -C "$BF_ROOT"
 
 log_success "Files extracted to ${BF_ROOT}"
@@ -115,7 +122,8 @@ else
 fi
 
 # Set executable permissions
-chmod +x bf1942_lnxded.dynamic bf1942_lnxded.static fixinstall.sh bfsmd bfsmd.static
+# Added bfsmd and bfsmd.static as requested
+chmod +x start.sh bf1942_lnxded.dynamic bf1942_lnxded.static fixinstall.sh bfsmd bfsmd.static
 
 # Execute fixinstall.sh
 if [ -f "fixinstall.sh" ]; then 
@@ -195,7 +203,32 @@ systemctl start bfsmd.service
 log_success "Service started successfully."
 
 # ------------------------------------------------------------
-# 8) Final Summary
+# 8) Optional: Firewall Configuration (UFW)
+# ------------------------------------------------------------
+echo ""
+log_info "Firewall Configuration"
+read -r -p "Would you like to automatically add UFW firewall rules for BF1942? [y/N] " response
+
+if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+    log_info "Applying UFW rules..."
+    
+    if command -v ufw >/dev/null; then
+        # Rules requested: 14567/udp, 23000/udp, 14667/udp
+        ufw allow 14567/udp comment 'BF1942 Game Port'
+        ufw allow 23000/udp comment 'BF1942 GameSpy Query'
+        ufw allow 14667/udp comment 'BFSMD Manager Port'
+        
+        ufw reload
+        log_success "Firewall rules added for ports 14567, 23000, and 14667 (UDP)."
+    else
+        log_warn "UFW is not installed. Skipping firewall configuration."
+    fi
+else
+    log_info "Skipping firewall configuration."
+fi
+
+# ------------------------------------------------------------
+# 9) Final Summary
 # ------------------------------------------------------------
 echo ""
 echo "=================================================="

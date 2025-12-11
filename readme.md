@@ -36,13 +36,13 @@ The setup script contains several configuration variables at the top that you ca
 
 ### 1️⃣ Download and Run
 
-You have two options for installation. **We recommend using the BFSMD version** for the ease of server and player management.
+You have two options for installation. **We recommend using the BFSMD version** for the ease of server and player management. The installation scripts in this ReadMe are for Ubuntu 24.0.3 LTS.  For others distro's select the appropriate install script from the project and adjust the file names and links accordingly. 
 
 #### Option A: Install with BFSMD (Recommended)
 This version installs the Battlefield Server Manager Daemon, allowing you to manage the server remotely via the Windows client.
 
 ```bash
-wget [https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_bfsmd_setup.sh](https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_bfsmd_setup.sh)
+curl -O https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_bfsmd_setup.sh
 chmod +x 24.0.3_bfsmd_setup.sh
 sudo ./24.0.3_bfsmd_setup.sh
 ```
@@ -51,15 +51,12 @@ sudo ./24.0.3_bfsmd_setup.sh
 This version installs the base dedicated server without the remote manager daemon.
 
 ```bash
-wget [https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_setup.sh](https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_setup.sh)
+curl -# -O https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_setup.sh
 chmod +x 24.0.3_setup.sh
 sudo ./24.0.3_setup.sh
 ```
 
 ---
-
-![BFSMD Login](images/bfsmd_password.png)
-
 ### 2️⃣ Connect to Server Manager (BFSMD Only)
 If you installed the BFSMD version, open your Battlefield Server Manager client (Windows) and connect using your server's IP address. Use the default credentials below:
 

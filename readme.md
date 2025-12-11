@@ -40,6 +40,10 @@ You have two options for installation. **We recommend using the BFSMD version** 
 
 #### Option A: Install with BFSMD (Recommended)
 This version installs the Battlefield Server Manager Daemon, allowing you to manage the server remotely via the Windows client.
+**During installation, you will be prompted to:**
+1. Set a password for the service user.
+2. Choose between **BF Remote Manager v2.0 (Final)** or **v2.01 (Patched)**.
+3. Automatically configure UFW firewall rules (optional).
 
 ```bash
 curl -O https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_bfsmd_setup.sh
@@ -89,6 +93,12 @@ For security, do not keep using the default account.
 
 ![Set Admin Users](images/bfsmd_adminpassword.png)
 ---
+
+
+## 🧩 Server Manager Downloads for Windows
+1. BFRM Version 2.0 - https://files.bf1942.online/server/toolsBFRemoteManager20final-patched.zip
+2. BFRM Version 2.1 (patched) - https://files.bf1942.online/server/tools/BFRemoteManager201-patched.zip
+
 
 ## 🧪 Supported Distributions
 

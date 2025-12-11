@@ -16,14 +16,21 @@
 set -euo pipefail
 
 # ------------------------------------------------------------
+# PRE-FLIGHT CHECKS
+# ------------------------------------------------------------
+# Ensure script is running with administrative privileges (sudo)
+if [[ $EUID -ne 0 ]]; then
+   echo -e "\e[31m[ERROR] This script requires admin privileges. Please run with sudo:\e[0m"
+   echo -e "        sudo $0"
+   exit 1
+fi
+
+# ------------------------------------------------------------
 # CONFIGURATION
 # ------------------------------------------------------------
 BF_USER="bf1942_user"
 BF_HOME="/home/${BF_USER}"
 BF_ROOT="${BF_HOME}/bf1942"
-# Note: You can change this URL to a custom mirror if needed.
-# If hosting yourself, ensure the tar structure matches the official one.
-SERVER_TAR_URL="https://files.bf1942.online/server/linux/linux-bf1942-server-bfsm.tar"
 SUDOERS_FILE="/etc/sudoers.d/${BF_USER}"
 SERVICE_FILE="/etc/systemd/system/bfsmd.service"
 
@@ -31,6 +38,30 @@ SERVICE_FILE="/etc/systemd/system/bfsmd.service"
 log_info() { echo -e "\e[34m[INFO]\e[0m $1"; }
 log_success() { echo -e "\e[32m[OK]\e[0m $1"; }
 log_warn() { echo -e "\e[33m[WARN]\e[0m $1"; }
+
+# ------------------------------------------------------------
+# SAFETY: Cleanup Trap & Install Guard
+# ------------------------------------------------------------
+# Create a temporary directory safely for downloads
+TEMP_DIR=$(mktemp -d)
+
+# Cleanup function to run on exit (successful or failed)
+cleanup() {
+    if [ -d "$TEMP_DIR" ]; then
+        rm -rf "$TEMP_DIR"
+    fi
+}
+trap cleanup EXIT
+
+# Check if install directory already exists and is not empty
+if [ -d "$BF_ROOT" ] && [ "$(ls -A "$BF_ROOT")" ]; then
+    log_warn "Target directory '$BF_ROOT' already exists and is not empty."
+    read -r -p "Do you want to continue and potentially overwrite files? [y/N] " confirm
+    if [[ ! "$confirm" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+        echo "Installation aborted by user."
+        exit 0
+    fi
+fi
 
 # ------------------------------------------------------------
 # 1) User Management
@@ -74,9 +105,8 @@ apt-get install -y --no-install-recommends \
     libx11-6:i386 libncurses6:i386 wget tar
 
 # Install legacy libraries required by the 2003 binaries
-# If you are hosting these on your own server, update the URL/logic here.
 log_info "Fetching and installing legacy Debian libraries..."
-TEMP_DIR=$(mktemp -d)
+
 pushd "$TEMP_DIR" > /dev/null
 
 DEB_NCURSES="http://deb.debian.org/debian/pool/main/n/ncurses"
@@ -90,17 +120,46 @@ dpkg -i libtinfo5*.deb libncurses5*.deb libstdc++5*.deb || true
 ldconfig
 
 popd > /dev/null
-rm -rf "$TEMP_DIR"
 log_success "Dependencies installed."
 
 # ------------------------------------------------------------
-# 3) Server Installation (Tarball Extraction)
+# 3) Server Installation (Version Selection & Download)
 # ------------------------------------------------------------
+echo ""
+echo "--------------------------------------------------"
+echo " SELECT SERVER MANAGER VERSION"
+echo "--------------------------------------------------"
+echo " 1) BF Remote Manager v2.0 (Final)"
+echo "    - Better support for special characters in player names."
+echo ""
+echo " 2) BF Remote Manager v2.01 (Patched)"
+echo "    - Fixes unauthorized admin bugs and PunkBuster lists."
+echo "    - KNOWN ISSUE: May truncate names with special characters."
+echo "--------------------------------------------------"
+read -r -p "Enter your choice [1 or 2]: " version_choice
+
+case "$version_choice" in
+    1)
+        SERVER_TAR_URL="https://files.bf1942.online/server/linux/linux-bf1942-server-bfsm-hitreg.tar"
+        log_info "Selected: v2.0 (Final)"
+        ;;
+    2)
+        SERVER_TAR_URL="https://files.bf1942.online/server/linux/linux-bf1942-server-bfsm-hitreg-201patched.tar"
+        log_info "Selected: v2.01 (Patched)"
+        ;;
+    *)
+        echo -e "\e[33m[WARN] Invalid input. Defaulting to Option 1 (v2.0 Final).\e[0m"
+        SERVER_TAR_URL="https://files.bf1942.online/server/linux/linux-bf1942-server-bfsm-hitreg.tar"
+        ;;
+esac
+
 log_info "Downloading and installing Server files..."
 
-# Extract the server files, removing the top-level directory from the tarball
-# (Assumes BFSMD files are included in this tarball)
-wget -qO- "$SERVER_TAR_URL" | tar -x --strip-components=1 -C "$BF_ROOT"
+# Extract the server files
+if ! wget -qO- "$SERVER_TAR_URL" | tar -x --strip-components=1 -C "$BF_ROOT"; then
+    echo -e "\e[31m[ERROR] Download or extraction failed. Check your internet connection.\e[0m"
+    exit 1
+fi
 
 log_success "Files extracted to ${BF_ROOT}"
 
@@ -122,7 +181,6 @@ else
 fi
 
 # Set executable permissions
-# Added bfsmd and bfsmd.static as requested
 chmod +x start.sh bf1942_lnxded.dynamic bf1942_lnxded.static fixinstall.sh bfsmd bfsmd.static
 
 # Execute fixinstall.sh
@@ -148,22 +206,10 @@ Description=Battlefield 1942 Server Manager Daemon
 After=network.target
 
 [Service]
-# BFSMD runs as a daemon using the -daemon flag, so we use Type=forking
 Type=forking
 WorkingDirectory=${BF_ROOT}
 Environment=TERM=xterm
-
-# Start command:
-# -path: Path to the game server root
-# -ip:   Bind IP (0.0.0.0 binds to all interfaces)
-# -port: Game port (default 14667)
-# -restart: Auto-restart the server if it crashes
-# -start:   Start the server immediately
-# -nodelay: Skip startup delay
-# -daemon:  Run in background
 ExecStart=${BF_ROOT}/bfsmd -path ${BF_ROOT} -ip 0.0.0.0 -port 14667 -restart -start -nodelay -daemon
-
-# Restart the daemon itself if it fails
 Restart=on-failure
 RestartSec=5
 User=${BF_USER}
@@ -213,7 +259,6 @@ if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
     log_info "Applying UFW rules..."
     
     if command -v ufw >/dev/null; then
-        # Rules requested: 14567/udp, 23000/udp, 14667/udp
         ufw allow 14567/udp comment 'BF1942 Game Port'
         ufw allow 23000/udp comment 'BF1942 GameSpy Query'
         ufw allow 14667/udp comment 'BFSMD Manager Port'
@@ -228,7 +273,18 @@ else
 fi
 
 # ------------------------------------------------------------
-# 9) Final Summary
+# 9) Service Restart (Ensure clean init)
+# ------------------------------------------------------------
+echo ""
+log_info "Performing final service restart sequence..."
+systemctl stop bfsmd.service
+log_info "Waiting 5 seconds..."
+sleep 5
+systemctl start bfsmd.service
+log_success "Service restarted."
+
+# ------------------------------------------------------------
+# 10) Final Summary
 # ------------------------------------------------------------
 echo ""
 echo "=================================================="

@@ -261,10 +261,10 @@ if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
     if command -v ufw >/dev/null; then
         ufw allow 14567/udp comment 'BF1942 Game Port'
         ufw allow 23000/udp comment 'BF1942 GameSpy Query'
-        ufw allow 14667/udp comment 'BFSMD Manager Port'
+        ufw allow 14667/tcp comment 'BFSMD Manager Port'
         
         ufw reload
-        log_success "Firewall rules added for ports 14567, 23000, and 14667 (UDP)."
+        log_success "Firewall rules added for ports 14567, 23000, and 14667 (TCP/UDP)."
     else
         log_warn "UFW is not installed. Skipping firewall configuration."
     fi

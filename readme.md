@@ -65,10 +65,10 @@ View all ports: `./bf1942_manager.sh ports`
 
 ```bash
 # Download main setup script
-wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/bf1942_unified_setup.sh
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/ubu_24.0.3_bfsmd_setup.sh
 
 # Download management tool
-wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/bf1942_manager.sh
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main//ubuntu/bf1942_manager.sh
 
 # Make executable
 chmod +x bf1942_unified_setup.sh bf1942_manager.sh

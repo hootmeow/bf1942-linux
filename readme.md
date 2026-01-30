@@ -57,9 +57,11 @@ View all ports: `./bf1942_manager.sh ports`
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Ubuntu 24.0.3 LTS)
 
 > **Prerequisite:** User with **sudo** privileges
+
+This quick start guide targets Ubuntu 24.04 LTS. For other distributions, please use the dedicated scripts found in their respective directories, which contain the necessary version-specific details.
 
 ### 1️⃣ Download Scripts
 

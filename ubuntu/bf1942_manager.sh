@@ -583,6 +583,152 @@ remove_instance() {
     log_success "Instance '$name' has been removed."
 }
 
+# Backup instance
+backup_instance() {
+    local name="${1:-}"
+    
+    if [ -z "$name" ]; then
+        log_error "Instance name required."
+        echo "Usage: $0 backup <instance_name>"
+        exit 1
+    fi
+    
+    local instance_dir="${BF_BASE}/${name}"
+    
+    if [ ! -d "$instance_dir" ]; then
+        log_error "Instance '$name' not found."
+        exit 1
+    fi
+    
+    local backup_file="bf1942_${name}_backup_$(date +%Y%m%d_%H%M%S).tar.gz"
+    local backup_dir="/root/bf1942_backups"
+    
+    mkdir -p "$backup_dir"
+    
+    log_info "Creating backup of instance '$name'..."
+    log_info "This may take a minute..."
+    
+    if tar -czf "${backup_dir}/${backup_file}" -C "${BF_BASE}" "${name}" 2>/dev/null; then
+        local size=$(du -h "${backup_dir}/${backup_file}" | cut -f1)
+        log_success "Backup created: ${backup_dir}/${backup_file} (${size})"
+        echo ""
+        echo "To restore this backup:"
+        echo "  sudo tar -xzf ${backup_dir}/${backup_file} -C ${BF_BASE}"
+        echo "  sudo systemctl restart bfsmd-${name}.service"
+    else
+        log_error "Backup failed!"
+        exit 1
+    fi
+}
+
+# Start all instances
+start_all() {
+    require_root
+    
+    log_info "Starting all instances..."
+    echo ""
+    
+    local count=0
+    
+    # Standalone
+    if [ -f "/etc/systemd/system/bf1942.service" ]; then
+        systemctl start bf1942.service
+        ((count++)) || true
+        echo "  Started: default (standalone)"
+    fi
+    
+    # BFSMD instances
+    if [ -d "$BF_BASE" ]; then
+        for dir in "$BF_BASE"/*; do
+            if [ -d "$dir" ]; then
+                local name=$(basename "$dir")
+                local service="bfsmd-${name}.service"
+                
+                if [ -f "/etc/systemd/system/${service}" ]; then
+                    systemctl start "${service}"
+                    ((count++)) || true
+                    echo "  Started: $name"
+                fi
+            fi
+        done
+    fi
+    
+    echo ""
+    log_success "Started $count instance(s)"
+}
+
+# Stop all instances
+stop_all() {
+    require_root
+    
+    log_info "Stopping all instances..."
+    echo ""
+    
+    local count=0
+    
+    # Standalone
+    if [ -f "/etc/systemd/system/bf1942.service" ]; then
+        systemctl stop bf1942.service
+        ((count++)) || true
+        echo "  Stopped: default (standalone)"
+    fi
+    
+    # BFSMD instances
+    if [ -d "$BF_BASE" ]; then
+        for dir in "$BF_BASE"/*; do
+            if [ -d "$dir" ]; then
+                local name=$(basename "$dir")
+                local service="bfsmd-${name}.service"
+                
+                if [ -f "/etc/systemd/system/${service}" ]; then
+                    systemctl stop "${service}"
+                    ((count++)) || true
+                    echo "  Stopped: $name"
+                fi
+            fi
+        done
+    fi
+    
+    echo ""
+    log_success "Stopped $count instance(s)"
+}
+
+# Restart all instances
+restart_all() {
+    require_root
+    
+    log_info "Restarting all instances..."
+    echo ""
+    
+    local count=0
+    
+    # Standalone
+    if [ -f "/etc/systemd/system/bf1942.service" ]; then
+        systemctl restart bf1942.service
+        ((count++)) || true
+        echo "  Restarted: default (standalone)"
+    fi
+    
+    # BFSMD instances
+    if [ -d "$BF_BASE" ]; then
+        for dir in "$BF_BASE"/*; do
+            if [ -d "$dir" ]; then
+                local name=$(basename "$dir")
+                local service="bfsmd-${name}.service"
+                
+                if [ -f "/etc/systemd/system/${service}" ]; then
+                    systemctl restart "${service}"
+                    ((count++)) || true
+                    echo "  Restarted: $name"
+                fi
+            fi
+        done
+    fi
+    
+    echo ""
+    log_success "Restarted $count instance(s)"
+}
+
 # Show usage
 show_usage() {
     cat << EOF
@@ -594,14 +740,18 @@ ${BOLD}Commands:${NC}
   ${CYAN}list${NC}              - List all instances and their status
   ${CYAN}ports${NC}             - Show port assignments for all instances
   ${CYAN}status${NC} [name]     - Show detailed status of instance(s)
-  ${CYAN}config${NC} <n>     - Show configuration paths for instance
+  ${CYAN}config${NC} <n>        - Show configuration paths for instance
   ${CYAN}health${NC}            - Check health of all instances
   ${CYAN}security${NC}          - Run security audit on all instances
-  ${CYAN}start${NC} <n>      - Start an instance
-  ${CYAN}stop${NC} <n>       - Stop an instance
-  ${CYAN}restart${NC} <n>    - Restart an instance
-  ${CYAN}logs${NC} <n>       - View logs for an instance (tail -f)
-  ${CYAN}remove${NC} <n>     - Remove an instance (requires confirmation)
+  ${CYAN}backup${NC} <n>        - Create backup of instance configuration
+  ${CYAN}start${NC} <n>         - Start an instance
+  ${CYAN}stop${NC} <n>          - Stop an instance
+  ${CYAN}restart${NC} <n>       - Restart an instance
+  ${CYAN}start-all${NC}         - Start all instances
+  ${CYAN}stop-all${NC}          - Stop all instances
+  ${CYAN}restart-all${NC}       - Restart all instances
+  ${CYAN}logs${NC} <n>          - View logs for an instance (tail -f)
+  ${CYAN}remove${NC} <n>        - Remove an instance (requires confirmation)
 
 ${BOLD}Examples:${NC}
   $0 list
@@ -609,7 +759,9 @@ ${BOLD}Examples:${NC}
   $0 config server1
   $0 health
   $0 security
+  $0 backup server1
   sudo $0 restart server1
+  sudo $0 start-all
   sudo $0 remove server2
 
 ${BOLD}Notes:${NC}
@@ -671,6 +823,23 @@ main() {
                 exit 1
             fi
             restart_instance "$2"
+            ;;
+        backup)
+            if [ -z "${2:-}" ]; then
+                log_error "Instance name required."
+                echo "Usage: $0 backup <instance_name>"
+                exit 1
+            fi
+            backup_instance "$2"
+            ;;
+        start-all)
+            start_all
+            ;;
+        stop-all)
+            stop_all
+            ;;
+        restart-all)
+            restart_all
             ;;
         logs)
             if [ -z "${2:-}" ]; then

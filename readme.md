@@ -73,13 +73,13 @@ wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/ubu_24.
 wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main//ubuntu/bf1942_manager.sh
 
 # Make executable
-chmod +x bf1942_unified_setup.sh bf1942_manager.sh
+chmod +x ubu_24.0.3_bfsmd_setup.sh bf1942_manager.sh
 ```
 
 ### 2️⃣ Install Your First Server
 
 ```bash
-sudo ./bf1942_unified_setup.sh
+sudo ./ubu_24.0.3_bfsmd_setup.sh
 ```
 
 **Interactive Setup:**
@@ -97,11 +97,10 @@ sudo ./bf1942_unified_setup.sh
 ### 3️⃣ Create Additional Instances (BFSMD Only)
 
 ```bash
-# Add more servers with different names
-sudo ./bf1942_unified_setup.sh server2
-sudo ./bf1942_unified_setup.sh conquest
-sudo ./bf1942_unified_setup.sh tdm
-```
+# Add more servers with different names 
+sudo ./ubu_24.0.3_bfsmd_setup.sh server2
+sudo ./ubu_24.0.3_bfsmd_setup.sh hootmeow
+
 
 Each instance:
 - Gets unique ports automatically

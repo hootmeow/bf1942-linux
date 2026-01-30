@@ -1,122 +1,514 @@
-# 🪖 Battlefield 1942 Dedicated Server (Linux, Non-Privileged Runtime)
+# 🪖 Battlefield 1942 Dedicated Server (Linux) - Enhanced Multi-Instance
 
-Automated setup script for running a **Battlefield 1942 Dedicated Server** on modern 64-bit Linux systems.
+Automated setup for running **Battlefield 1942 Dedicated Servers** on modern 64-bit Linux systems with **multi-instance support**.
 
 This solution installs the legacy 32-bit Battlefield 1942 dedicated server using a dedicated, non-privileged account, following best security practices. It handles dependency resolution (including legacy libraries), user creation, and server installation in a single pass.
+
+✨ **Features**: Multi-instance support, smart IP detection, automatic port management, CPU affinity tuning, and comprehensive management tools.
 
 ---
 
 ## 🧩 Overview
 
-- **Single-Script Setup**: One script handles OS dependencies, user creation, and game installation.
-- **Secure Runtime**: Runs entirely under a dedicated service account (`bf1942_user`).
-- **Modern Compatibility**: Automatically installs required i386 libraries and legacy `libncurses5`/`libstdc++5` on Ubuntu 24.04+ / Debian 12+.
-- **Systemd Integration**: Managed via standard `systemctl` commands.
-- **Optional Manager**: Option to install **BFSMD** (Battlefield Server Manager Daemon) for easy remote GUI management.
+- **Single-Script Setup**: One unified script handles everything - standalone or BFSMD modes
+- **Multi-Instance Support**: Run unlimited servers on one machine with automatic port allocation
+- **Smart Configuration**: Interactive IP detection, port conflict prevention, resource validation
+- **Performance Optimized**: CPU affinity, memory limits, I/O tuning automatically configured
+- **Secure Runtime**: Runs entirely under dedicated service account (`bf1942_user`)
+- **Modern Compatibility**: Automatically installs required i386 libraries on Ubuntu 24.04+ / Debian 12+
+- **Systemd Integration**: Managed via standard `systemctl` commands
+- **Management Tools**: Comprehensive CLI tool for monitoring and managing all instances
+
+---
+
+## 🎯 Features
+
+### Multi-Instance Capabilities
+- **Automatic port allocation** - Each instance gets unique ports based on name hash
+- **CPU core assignment** - Automatic CPU affinity for optimal performance
+- **Resource management** - Memory limits and I/O priority per instance
+- **Centralized management** - Single tool to control all servers
+
+### Network Intelligence
+- **Smart IP detection** - Auto-detects local and public IP addresses
+- **Network scenario support** - Works with NAT, LAN, cloud, and direct public IPs
+- **Port conflict detection** - Prevents failed installations due to port conflicts
+- **Firewall integration** - Interactive UFW configuration with security options
+
+### Security & Monitoring
+- **Input validation** - Comprehensive validation of all user inputs
+- **Security audit** - Check process ownership, file permissions, passwords
+- **Health monitoring** - Real-time status of all running instances
+- **Non-root execution** - All services run as bf1942_user
 
 ---
 
 ## ⚙️ Configuration
 
-The setup script contains several configuration variables at the top that you can customize before running.
+Each instance gets automatically calculated ports based on its name:
 
-| Variable | Default | Description |
-| :--- | :--- | :--- |
-| `BF_USER` | `bf1942_user` | The system username created to run the server. |
-| `BF_HOME` | `/home/bf1942_user` | The home directory for the service user. |
-| `BF_ROOT` | `~/bf1942` | The actual game installation directory. |
-| `SERVER_TAR_URL` | `.../linux-bf1942-server.tar` | URL to the game server tarball. |
+| Port Type | Formula | Example (server1) | Example (server2) |
+|-----------|---------|-------------------|-------------------|
+| Game Port | 14567 + hash | 14600 (UDP) | 14605 (UDP) |
+| Query Port | 23000 + hash | 23033 (UDP) | 23038 (UDP) |
+| Management Port | 14667 + hash | 14700 (TCP) | 14705 (TCP) |
 
+View all ports: `./bf1942_manager.sh ports`
+
+---
+
+## 🚀 Quick Start
+
+> **Prerequisite:** User with **sudo** privileges
+
+### 1️⃣ Download Scripts
+
+```bash
+# Download main setup script
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/bf1942_unified_setup.sh
+
+# Download management tool
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/bf1942_manager.sh
+
+# Make executable
+chmod +x bf1942_unified_setup.sh bf1942_manager.sh
+```
+
+### 2️⃣ Install Your First Server
+
+```bash
+sudo ./bf1942_unified_setup.sh
+```
+
+**Interactive Setup:**
+- Choose installation mode (Standalone or BFSMD)
+- Select IP address (auto-detected options provided)
+- Choose BFSMD version (if applicable)
+- Configure firewall rules (optional)
+
+**For BFSMD Mode**, you'll be prompted for:
+1. **Instance name** - Choose a unique name (e.g., "server1", "conquest", "tdm")
+2. **IP address** - Select from detected IPs or enter custom
+3. **BFSMD version** - Choose v2.0 (recommended) or v2.01 (patched)
+4. **Firewall rules** - Optional UFW configuration with security levels
+
+### 3️⃣ Create Additional Instances (BFSMD Only)
+
+```bash
+# Add more servers with different names
+sudo ./bf1942_unified_setup.sh server2
+sudo ./bf1942_unified_setup.sh conquest
+sudo ./bf1942_unified_setup.sh tdm
+```
+
+Each instance:
+- Gets unique ports automatically
+- Runs independently
+- Can be managed separately
+- Has dedicated CPU cores (when available)
 
 ---
 
-## 🚀 Usage
+## 🎮 Connect to BFRM (BFSMD Mode)
 
-> **Prerequisite:** Commands must be run by a user with **sudo** privileges.
-
-### 1️⃣ Download and Run
-
-You have two options for installation. **We recommend using the BFSMD version** for the ease of server and player management. The installation scripts in this ReadMe are for Ubuntu 24.0.3 LTS.  For others distro's select the appropriate install script from the project and adjust the file names and links accordingly. 
-
-#### Option A: Install with BFSMD (Recommended)
-This version installs the Battlefield Server Manager Daemon, allowing you to manage the server remotely via the Windows client.
-**During installation, you will be prompted to:**
-1. Set a password for the service user.
-2. Choose between **BF Remote Manager v2.0 (Final)** or **v2.01 (Patched)**.
-3. Automatically configure UFW firewall rules (optional).
-
-```bash
-curl -O https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_bfsmd_setup.sh
-chmod +x 24.0.3_bfsmd_setup.sh
-sudo ./24.0.3_bfsmd_setup.sh
-```
-
-#### Option B: Standard Installation
-This version installs the base dedicated server without the remote manager daemon.
-
-```bash
-curl -# -O https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/24.0.3_setup.sh
-chmod +x 24.0.3_setup.sh
-sudo ./24.0.3_setup.sh
-```
-
----
-### 2️⃣ Connect to Server Manager (BFSMD Only)
-If you installed the BFSMD version, open your Battlefield Server Manager client (Windows) and connect using your server's IP address. Use the default credentials below:
+### Default Credentials
+All servers use default credentials initially:
 
 ```text
-Default Username : bf1942
-Default Password : battlefield
+Username: bf1942
+Password: battlefield
 ```
+
+⚠️ **CRITICAL**: Change password immediately via BFRM after first login!
+
+### Connection Steps
+
+1. **Open BFRM client** (Windows)
+2. **Connect** to `your-server-ip:management-port`
+3. **Login** with default credentials
+4. **Change password** immediately (Admin tab)
+
 ![BFSMD Login](images/bfsmd_password.png)
 
-### 3️⃣ Set Server IP
-Once connected, navigate to the IP settings tab. You must set the server's IP address explicitly under the **IP Address** field to ensure it binds correctly to your network interface.
+### First-Time Configuration
+
+#### Set Server IP
+Navigate to IP settings and set your server's IP address explicitly:
 
 ![Set Server IP](images/bfsmd_ip_addr.png)
 
-### 4️⃣ Secure Remote Console & Admin
-Go to the **Remote Console** or **Admin** tab. Change the default passwords immediately to something secure. This protects your server from unauthorized rcon commands.
+#### Secure Remote Console & Admin
+Change default remote console password and create secure admin accounts:
 
 ![Remote Console Security](images/bfsmd_remoteconsole.png)
 
-### 5️⃣ Set a Default Map
-The server requires a map rotation to start effectively. Go to the **Maps** list and add at least one map to the rotation to set it as the default map.
+#### Set Default Map
+Add at least one map to rotation:
 
 ![Set Default Map](images/bfsmd_setmap.png)
 
-### 6️⃣ Server Manager Users
-For security, do not keep using the default account.
-1.  Change the password for the `bf1942` user from the default (`battlefield`).
-2.  Create new accounts for any other admins if needed.
-3.  Ensure you set appropriate permissions for each user.
+#### Update Admin Passwords
+Create secure admin accounts and disable defaults:
 
 ![Set Admin Users](images/bfsmd_adminpassword.png)
 
-### 🛠️ Applying Patches
-The patches folder contains python scripts to improve various server bugs. Please see individual patch files for addtional details and how to apply.
+---
+
+## 🛠️ Management Commands
+
+### Using bf1942_manager.sh
+
+```bash
+# View all instances
+./bf1942_manager.sh list
+
+# Check port assignments
+./bf1942_manager.sh ports
+
+# View detailed status
+./bf1942_manager.sh status server1
+
+# Show configuration paths
+./bf1942_manager.sh config server1
+
+# Health check all instances
+./bf1942_manager.sh health
+
+# Security audit
+./bf1942_manager.sh security
+
+# Service control
+sudo ./bf1942_manager.sh start server1
+sudo ./bf1942_manager.sh stop server1
+sudo ./bf1942_manager.sh restart server1
+
+# View live logs
+./bf1942_manager.sh logs server1
+
+# Remove instance (with confirmation)
+sudo ./bf1942_manager.sh remove server2
+```
+
+### Direct Systemd Commands
+
+```bash
+# Standalone server
+sudo systemctl status bf1942.service
+sudo systemctl restart bf1942.service
+journalctl -u bf1942.service -f
+
+# BFSMD instance
+sudo systemctl status bfsmd-server1.service
+sudo systemctl restart bfsmd-server1.service
+journalctl -u bfsmd-server1.service -f
+```
 
 ---
 
-## 🧩 Server Manager Downloads for Windows
-1. BFRM Version 2.0 - https://files.bf1942.online/server/toolsBFRemoteManager20final-patched.zip
-2. BFRM Version 2.1 (patched) - https://files.bf1942.online/server/tools/BFRemoteManager201-patched.zip
+## 📁 Configuration Files
+
+### Standalone Server
+```
+/home/bf1942_user/bf1942/mods/bf1942/settings/
+├── ServerSettings.con  # Game settings
+└── MapList.con        # Map rotation
+```
+
+### BFSMD Instance
+```
+/home/bf1942_user/instances/<name>/mods/bf1942/settings/
+├── servermanager.con  # BFSMD settings
+├── useraccess.con     # Admin accounts
+├── ServerSettings.con # Game settings
+└── MapList.con       # Map rotation
+```
+
+### Edit Configuration
+
+```bash
+# Example: Change server name
+nano /home/bf1942_user/instances/server1/mods/bf1942/settings/ServerSettings.con
+
+# Find and edit:
+game.serverName "Your Server Name Here"
+
+# Restart to apply
+sudo systemctl restart bfsmd-server1.service
+```
+
+---
+
+## 🔒 Security Best Practices
+
+### Immediate Actions After Installation
+1. ✅ Connect to BFRM with default credentials
+2. ✅ Change password immediately (Admin tab)
+3. ✅ Create unique admin accounts
+4. ✅ Disable or remove default bf1942 account
+5. ✅ Configure firewall restrictions
+
+### Firewall Configuration
+
+During installation, you can choose management port security:
+
+**Option 1: Open to All** (Easiest)
+- Anyone can attempt connection
+- Still requires password
+- Good for: Testing, behind other firewall
+
+**Option 2: Restrict to IP** (Recommended)
+- Only specified IP can connect
+- Firewall + password protection
+- Good for: Static admin IP
+
+**Option 3: SSH Tunnel** (Most Secure)
+- No direct internet access
+- All traffic encrypted via SSH
+- Good for: Maximum security
+
+### SSH Tunnel Example
+```bash
+# On your local machine
+ssh -L 14700:localhost:14700 user@your-server-ip
+
+# Then connect BFRM to localhost:14700
+```
+
+### Security Audit
+```bash
+./bf1942_manager.sh security
+```
+
+Checks:
+- Process ownership (should be bf1942_user, not root)
+- File permissions
+- Default password usage
+- Firewall configuration
+- Port exposure
+
+---
+
+## 🌐 Network Scenarios
+
+### Home Server (Behind Router)
+
+**During Installation:**
+- Choose: **Local IP** (192.168.x.x)
+
+**Router Configuration:**
+- Forward Game port (UDP)
+- Forward Query port (UDP)  
+- Forward Management port (TCP) - optional
+
+**Players Connect To:**
+- Your public IP (google "what is my ip")
+
+### Cloud Server (AWS, DigitalOcean, Linode, etc.)
+
+**During Installation:**
+- Choose: **Local IP** (typically 10.x.x.x or private IP)
+
+**Cloud Firewall:**
+- Allow Game + Query ports from 0.0.0.0/0
+- Allow Management port from YOUR_IP only
+
+**Players Connect To:**
+- Your cloud instance's public IP
+
+### VPS with Direct Public IP
+
+**During Installation:**
+- Choose: **Public IP** (if no NAT)
+- Or: **Local IP** (if behind cloud firewall)
+
+**Firewall:**
+- Use UFW to restrict management access
+
+---
+
+## 🔧 Troubleshooting
+
+### "Internal error!" Messages
+**This is normal!** BFSMD v2.0/v2.01 shows these continuously when reading `/proc` on modern kernels. The server functions perfectly despite these messages.
+
+To filter them out:
+```bash
+journalctl -u bfsmd-server1.service -f | grep -v "Internal error"
+```
+
+### Can't Connect to Server
+```bash
+# 1. Check service is running
+systemctl is-active bfsmd-server1.service
+
+# 2. Check firewall
+sudo ufw status
+
+# 3. Check ports are listening
+sudo ss -tulnp | grep 14567
+
+# 4. View logs
+./bf1942_manager.sh logs server1
+```
+
+### Port Conflict During Installation
+If you get "port already in use":
+- Try a different instance name (generates different ports)
+- Check existing assignments: `./bf1942_manager.sh ports`
+- Remove conflicting instance if needed
+
+### Can't Login to BFRM
+1. Verify credentials: `bf1942` / `battlefield`
+2. Check management port is correct
+3. Verify firewall allows connection
+4. Check service is running
+5. Review logs for authentication errors
+
+### Performance Issues
+```bash
+# Run health check
+./bf1942_manager.sh health
+
+# Check CPU affinity
+./bf1942_manager.sh security
+
+# Monitor resources
+htop
+
+# Check for errors
+journalctl -u bfsmd-server1.service -n 100
+```
+
+---
+
+## 🛠️ Advanced Usage
+
+### Maximum Recommended Instances
+
+**Formula**: `CPU Cores × 2 = Recommended Max`
+
+Examples:
+- 2 cores → 4 instances max
+- 4 cores → 8 instances max
+- 8 cores → 16 instances max
+
+The script warns if you exceed recommended limits but allows you to proceed.
+
+### View Port Assignments
+```bash
+./bf1942_manager.sh ports
+```
+
+Example output:
+```
+Instance: server1
+  Game:  14600 (UDP)
+  Query: 23033 (UDP)
+  Mgmt:  14700 (TCP)
+
+Instance: server2
+  Game:  14605 (UDP)
+  Query: 23038 (UDP)
+  Mgmt:  14705 (TCP)
+```
+
+### Backup Instance Configuration
+```bash
+# Backup
+sudo tar -czf server1-backup-$(date +%F).tar.gz \
+  /home/bf1942_user/instances/server1/mods/bf1942/settings/
+
+# Restore
+sudo tar -xzf server1-backup-*.tar.gz -C /
+sudo systemctl restart bfsmd-server1.service
+```
+
+### Clone Instance Settings
+```bash
+# Copy settings from one instance to another
+sudo cp -r /home/bf1942_user/instances/server1/mods/bf1942/settings/* \
+           /home/bf1942_user/instances/server2/mods/bf1942/settings/
+
+# Important: Update the game port in ServerSettings.con
+sudo nano /home/bf1942_user/instances/server2/mods/bf1942/settings/ServerSettings.con
+
+# Restart
+sudo systemctl restart bfsmd-server2.service
+```
+
 ---
 
 ## 🧪 Supported Distributions
 
 | Distro | Status | Notes |
-| :--- | :--- | :--- |
-| **Ubuntu 24.04.3 LTS** | ✅ Tested | Primary tested platform. |
-| **Ubuntu 22.04 LTS** | 📝 TODO | Likely works; may need minor package name adjustments. |
-| **Debian 12 (Bookworm)** | 📝 TODO | Uses the same multiarch structure as Ubuntu. |
-| **Fedora** | 📝 TODO | Requires converting `apt` commands to `dnf`. |
-| **CentOS Stream / RHEL** | 📝 TODO | Requires converting `apt` commands to `yum/dnf`. |
+|--------|--------|-------|
+| **Ubuntu 24.04 LTS** | ✅ Tested | Primary platform |
+| **Ubuntu 22.04 LTS** | 📋 Planned | Minor package adjustments may be needed |
+| **Debian 12 (Bookworm)** | 📋 Planned | Same multiarch as Ubuntu |
+| **Debian 11 (Bullseye)** | 📋 Planned | Should work with adjustments |
+| **Fedora/RHEL/CentOS** | 📋 Planned | Convert apt to dnf/yum |
+
+---
+
+## 🛠️ Applying Patches
+
+The patches folder contains Python scripts to improve various server bugs. Please see individual patch files for additional details and how to apply.
+
+---
+
+## 📚 Additional Resources
+
+- **firewall_guide.md** - Detailed firewall configuration
+- **bf1942.online** - Community resources and downloads
 
 ---
 
 ## 🧑‍🎨 Author
-OWLCAT 🔗 https://github.com/hootmeow
+
+**OWLCAT**  
+🔗 GitHub: https://github.com/hootmeow  
+🌐 Website: https://www.bf1942.online
+
+---
+
+## 📥 BFRM Downloads (Windows)
+
+1. **BFRM v2.0 (Final)** - Recommended  
+   https://files.bf1942.online/server/tools/BFRemoteManager20final-patched.zip
+
+2. **BFRM v2.01 (Patched)** - Fixes admin bugs  
+   https://files.bf1942.online/server/tools/BFRemoteManager201-patched.zip
+
+---
+
+## 🤝 Contributing
+
+Contributions welcome! Please:
+1. Test your changes on Ubuntu 24.04
+2. Update documentation
+3. Follow existing code style
+4. Submit pull requests
+
+---
 
 ## 📜 License
-Scripts released under the MIT License. All Battlefield 1942 game assets remain © Electronic Arts Inc.
+
+Scripts released under the **MIT License**.  
+All Battlefield 1942 game assets remain © Electronic Arts Inc.
+
+---
+
+## 🆘 Support
+
+**Issues**: https://github.com/hootmeow/bf1942-linux/issues  
+**Community**: www.bf1942.online
+
+---
+
+## ⭐ Star This Project
+
+If you find this useful, please star the repository!
+
+---
+
+**Happy Gaming! 🎮**

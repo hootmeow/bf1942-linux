@@ -840,6 +840,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
+ReadWritePaths=${BF_ROOT}
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
@@ -870,6 +871,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
+ReadWritePaths=${BF_ROOT}
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
@@ -905,7 +907,7 @@ ${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop ${SERVICE_NAME}.service
 ${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart ${SERVICE_NAME}.service
 ${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl status ${SERVICE_NAME}.service
 ${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl status ${SERVICE_NAME}.service -l
-${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u ${SERVICE_NAME}.service
+${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u ${SERVICE_NAME}.service *
 EOF
 
 chmod 440 "$SUDOERS_FILE"

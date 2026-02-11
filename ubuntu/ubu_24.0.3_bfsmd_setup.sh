@@ -17,6 +17,7 @@
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
+umask 022
 
 # Configuration
 BF_USER="bf1942_user"
@@ -295,7 +296,11 @@ save_credentials() {
     local mgmt_port="$4"
     local server_ip="$5"
     
-    local cred_file="/root/.bf1942_credentials_${instance}.txt"
+    local cred_dir="${BF_HOME}/credentials"
+    mkdir -p "$cred_dir"
+    chmod 700 "$cred_dir"
+
+    local cred_file="${cred_dir}/${instance}.txt"
     
     cat > "$cred_file" << EOF
 ═══════════════════════════════════════════════════════════
@@ -337,7 +342,7 @@ EOF
 
     chmod 600 "$cred_file"
     
-    local master_file="/root/.bf1942_all_credentials.txt"
+    local master_file="${cred_dir}/all_credentials.txt"
     {
         echo ""
         echo "----------------------------------------"
@@ -349,7 +354,8 @@ EOF
         echo "----------------------------------------"
     } >> "$master_file"
     chmod 600 "$master_file" 2>/dev/null || true
-    
+    chown -R "${BF_USER}:${BF_USER}" "$cred_dir" 2>/dev/null || true
+
     echo "$cred_file"
 }
 
@@ -398,6 +404,22 @@ EOF
     echo ""
     echo "Press ENTER to continue..."
     read -r
+}
+
+download_file() {
+    local url="$1"
+    local output="$2"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl --fail --location --silent --show-error \
+            --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2 \
+            -o "$output" "$url"
+    elif command -v wget >/dev/null 2>&1; then
+        wget --https-only --secure-protocol=TLSv1_2 --tries=3 -q -O "$output" "$url"
+    else
+        log_error "Neither curl nor wget is available for downloading files."
+        return 1
+    fi
 }
 
 # ------------------------------------------------------------
@@ -663,14 +685,14 @@ if [ ! -f "/etc/bf1942_deps_installed" ]; then
     
     pushd "$TEMP_DIR" > /dev/null
     
-    DEB_NCURSES="http://deb.debian.org/debian/pool/main/n/ncurses"
-    DEB_GCC="http://deb.debian.org/debian/pool/main/g/gcc-3.3"
+    DEB_NCURSES="https://deb.debian.org/debian/pool/main/n/ncurses"
+    DEB_GCC="https://deb.debian.org/debian/pool/main/g/gcc-3.3"
+
+    download_file "${DEB_NCURSES}/libtinfo5_6.2+20201114-2+deb11u2_i386.deb" "libtinfo5.deb"
+    download_file "${DEB_NCURSES}/libncurses5_6.2+20201114-2+deb11u2_i386.deb" "libncurses5.deb"
+    download_file "${DEB_GCC}/libstdc++5_3.3.6-34_i386.deb" "libstdc++5.deb"
     
-    wget -q "${DEB_NCURSES}/libtinfo5_6.2+20201114-2+deb11u2_i386.deb"
-    wget -q "${DEB_NCURSES}/libncurses5_6.2+20201114-2+deb11u2_i386.deb"
-    wget -q "${DEB_GCC}/libstdc++5_3.3.6-34_i386.deb"
-    
-    dpkg -i libtinfo5*.deb libncurses5*.deb libstdc++5*.deb || true
+    dpkg -i libtinfo5.deb libncurses5.deb libstdc++5.deb || true
     ldconfig
     
     popd > /dev/null
@@ -728,8 +750,14 @@ log_step "4/8: Downloading and installing server files"
 
 log_info "Downloading from: ${SERVER_TAR_URL}"
 
-if ! wget -qO- "$SERVER_TAR_URL" | tar -x --strip-components=1 -C "$BF_ROOT"; then
-    log_error "Download or extraction failed."
+SERVER_TAR_PATH="${TEMP_DIR}/server.tar"
+if ! download_file "$SERVER_TAR_URL" "$SERVER_TAR_PATH"; then
+    log_error "Download failed."
+    exit 1
+fi
+
+if ! tar -xf "$SERVER_TAR_PATH" --strip-components=1 --no-same-owner -C "$BF_ROOT"; then
+    log_error "Extraction failed."
     exit 1
 fi
 
@@ -808,6 +836,14 @@ Restart=on-failure
 RestartSec=5
 User=${BF_USER}
 Group=${BF_USER}
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target
@@ -830,6 +866,14 @@ Restart=on-failure
 RestartSec=5
 User=${BF_USER}
 Group=${BF_USER}
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
 
 # Performance Tuning
 CPUAffinity=${CPU_AFFINITY}
@@ -865,7 +909,13 @@ ${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u ${SERVICE_NAME}.service
 EOF
 
 chmod 440 "$SUDOERS_FILE"
-log_success "Sudoers configured"
+if visudo -cf "$SUDOERS_FILE" >/dev/null; then
+    log_success "Sudoers configured"
+else
+    log_error "Generated sudoers file is invalid. Removing it for safety."
+    rm -f "$SUDOERS_FILE"
+    exit 1
+fi
 
 # ------------------------------------------------------------
 # STEP 8: Start Service

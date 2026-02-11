@@ -100,7 +100,7 @@ sudo ./ubu_24.0.3_bfsmd_setup.sh
 # Add more servers with different names 
 sudo ./ubu_24.0.3_bfsmd_setup.sh server2
 sudo ./ubu_24.0.3_bfsmd_setup.sh hootmeow
-
+```
 
 Each instance:
 - Gets unique ports automatically
@@ -178,17 +178,22 @@ Create secure admin accounts and disable defaults:
 # Security audit
 ./bf1942_manager.sh security
 
-# Service control
-sudo ./bf1942_manager.sh start server1
-sudo ./bf1942_manager.sh stop server1
-sudo ./bf1942_manager.sh restart server1
+# Service control (works as bf1942_user if sudoers were installed)
+./bf1942_manager.sh start server1
+./bf1942_manager.sh stop server1
+./bf1942_manager.sh restart server1
 
 # View live logs
 ./bf1942_manager.sh logs server1
 
+# Backup instance files
+./bf1942_manager.sh backup server1
+
 # Remove instance (with confirmation)
 sudo ./bf1942_manager.sh remove server2
 ```
+
+Backups are stored under your current user's home directory in `~/bf1942_backups/`.
 
 ### Direct Systemd Commands
 

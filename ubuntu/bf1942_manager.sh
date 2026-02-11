@@ -14,6 +14,7 @@ set -euo pipefail
 BF_USER="bf1942_user"
 BF_BASE="/home/${BF_USER}/instances"
 BF_STANDALONE="/home/${BF_USER}/bf1942"
+VERSION="2.6"
 
 # Colors
 RED='\e[31m'
@@ -29,12 +30,51 @@ log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 
-# Check if running as root when needed
-require_root() {
-    if [[ $EUID -ne 0 ]]; then
-        log_error "This operation requires root privileges. Please run with sudo."
+validate_instance_name() {
+    local name="$1"
+
+    if [[ ! "$name" =~ ^[a-zA-Z][a-zA-Z0-9_-]{2,19}$ ]]; then
+        return 1
+    fi
+
+    case "${name,,}" in
+        default|root|admin|test|localhost|server)
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
+require_valid_instance_name() {
+    local name="$1"
+
+    if [ "$name" = "default" ]; then
+        return 0
+    fi
+
+    if ! validate_instance_name "$name"; then
+        log_error "Invalid instance name: '$name'"
+        log_info "Allowed pattern: starts with letter, 3-20 chars, letters/numbers/_/- only"
         exit 1
     fi
+}
+
+run_privileged() {
+    if [[ $EUID -eq 0 ]]; then
+        "$@"
+        return
+    fi
+
+    if command -v sudo >/dev/null 2>&1; then
+        if sudo -n "$@"; then
+            return
+        fi
+    fi
+
+    log_error "This operation needs elevated privileges or passwordless sudo for this command."
+    log_info "Run as root once to install sudoers entries, then execute as ${BF_USER}."
+    exit 1
 }
 
 # Get instance hash/ID from name
@@ -437,8 +477,8 @@ security_audit() {
 
 # Start instance
 start_instance() {
-    require_root
     local name="$1"
+    require_valid_instance_name "$name"
     
     local service
     if [ "$name" = "default" ]; then
@@ -453,10 +493,10 @@ start_instance() {
     fi
     
     log_info "Starting instance '$name'..."
-    systemctl start "$service"
+    run_privileged /usr/bin/systemctl start "$service"
     sleep 2
     
-    if systemctl is-active --quiet "$service"; then
+    if run_privileged /usr/bin/systemctl is-active --quiet "$service"; then
         log_success "Instance started successfully."
     else
         log_error "Failed to start instance. Check logs with:"
@@ -466,8 +506,8 @@ start_instance() {
 
 # Stop instance
 stop_instance() {
-    require_root
     local name="$1"
+    require_valid_instance_name "$name"
     
     local service
     if [ "$name" = "default" ]; then
@@ -482,14 +522,14 @@ stop_instance() {
     fi
     
     log_info "Stopping instance '$name'..."
-    systemctl stop "$service"
+    run_privileged /usr/bin/systemctl stop "$service"
     log_success "Instance stopped."
 }
 
 # Restart instance
 restart_instance() {
-    require_root
     local name="$1"
+    require_valid_instance_name "$name"
     
     local service
     if [ "$name" = "default" ]; then
@@ -504,10 +544,10 @@ restart_instance() {
     fi
     
     log_info "Restarting instance '$name'..."
-    systemctl restart "$service"
+    run_privileged /usr/bin/systemctl restart "$service"
     sleep 2
     
-    if systemctl is-active --quiet "$service"; then
+    if run_privileged /usr/bin/systemctl is-active --quiet "$service"; then
         log_success "Instance restarted successfully."
     else
         log_error "Failed to restart instance. Check logs."
@@ -517,6 +557,7 @@ restart_instance() {
 # Show logs
 show_logs() {
     local name="$1"
+    require_valid_instance_name "$name"
     
     local service
     if [ "$name" = "default" ]; then
@@ -532,13 +573,13 @@ show_logs() {
     
     log_info "Showing logs for instance '$name' (Press Ctrl+C to exit)..."
     sleep 1
-    journalctl -u "$service" -f
+    run_privileged /usr/bin/journalctl -u "$service" -f
 }
 
 # Remove instance
 remove_instance() {
-    require_root
     local name="$1"
+    require_valid_instance_name "$name"
     
     if [ "$name" = "default" ]; then
         log_error "Cannot remove default standalone instance using this command."
@@ -563,22 +604,22 @@ remove_instance() {
     fi
     
     log_info "Stopping service..."
-    systemctl stop "$service" 2>/dev/null || true
+    run_privileged /usr/bin/systemctl stop "$service" 2>/dev/null || true
     
     log_info "Disabling service..."
-    systemctl disable "$service" 2>/dev/null || true
+    run_privileged /usr/bin/systemctl disable "$service" 2>/dev/null || true
     
     log_info "Removing service file..."
-    rm -f "/etc/systemd/system/$service"
+    run_privileged /bin/rm -f "/etc/systemd/system/$service"
     
     log_info "Removing sudoers file..."
-    rm -f "/etc/sudoers.d/bf1942_${name}"
+    run_privileged /bin/rm -f "/etc/sudoers.d/bf1942_${name}"
     
     log_info "Removing instance files..."
-    rm -rf "$instance_path"
+    run_privileged /bin/rm -rf "$instance_path"
     
     log_info "Reloading systemd..."
-    systemctl daemon-reload
+    run_privileged /usr/bin/systemctl daemon-reload
     
     log_success "Instance '$name' has been removed."
 }
@@ -601,7 +642,7 @@ backup_instance() {
     fi
     
     local backup_file="bf1942_${name}_backup_$(date +%Y%m%d_%H%M%S).tar.gz"
-    local backup_dir="/root/bf1942_backups"
+    local backup_dir="${HOME}/bf1942_backups"
     
     mkdir -p "$backup_dir"
     
@@ -623,8 +664,6 @@ backup_instance() {
 
 # Start all instances
 start_all() {
-    require_root
-    
     log_info "Starting all instances..."
     echo ""
     
@@ -632,7 +671,7 @@ start_all() {
     
     # Standalone
     if [ -f "/etc/systemd/system/bf1942.service" ]; then
-        systemctl start bf1942.service
+        run_privileged /usr/bin/systemctl start bf1942.service
         ((count++)) || true
         echo "  Started: default (standalone)"
     fi
@@ -645,7 +684,7 @@ start_all() {
                 local service="bfsmd-${name}.service"
                 
                 if [ -f "/etc/systemd/system/${service}" ]; then
-                    systemctl start "${service}"
+                    run_privileged /usr/bin/systemctl start "${service}"
                     ((count++)) || true
                     echo "  Started: $name"
                 fi
@@ -659,8 +698,6 @@ start_all() {
 
 # Stop all instances
 stop_all() {
-    require_root
-    
     log_info "Stopping all instances..."
     echo ""
     
@@ -668,7 +705,7 @@ stop_all() {
     
     # Standalone
     if [ -f "/etc/systemd/system/bf1942.service" ]; then
-        systemctl stop bf1942.service
+        run_privileged /usr/bin/systemctl stop bf1942.service
         ((count++)) || true
         echo "  Stopped: default (standalone)"
     fi
@@ -681,7 +718,7 @@ stop_all() {
                 local service="bfsmd-${name}.service"
                 
                 if [ -f "/etc/systemd/system/${service}" ]; then
-                    systemctl stop "${service}"
+                    run_privileged /usr/bin/systemctl stop "${service}"
                     ((count++)) || true
                     echo "  Stopped: $name"
                 fi
@@ -695,8 +732,6 @@ stop_all() {
 
 # Restart all instances
 restart_all() {
-    require_root
-    
     log_info "Restarting all instances..."
     echo ""
     
@@ -704,7 +739,7 @@ restart_all() {
     
     # Standalone
     if [ -f "/etc/systemd/system/bf1942.service" ]; then
-        systemctl restart bf1942.service
+        run_privileged /usr/bin/systemctl restart bf1942.service
         ((count++)) || true
         echo "  Restarted: default (standalone)"
     fi
@@ -717,7 +752,7 @@ restart_all() {
                 local service="bfsmd-${name}.service"
                 
                 if [ -f "/etc/systemd/system/${service}" ]; then
-                    systemctl restart "${service}"
+                    run_privileged /usr/bin/systemctl restart "${service}"
                     ((count++)) || true
                     echo "  Restarted: $name"
                 fi

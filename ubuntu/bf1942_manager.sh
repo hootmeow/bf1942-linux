@@ -496,7 +496,7 @@ start_instance() {
     run_privileged /usr/bin/systemctl start "$service"
     sleep 2
     
-    if run_privileged /usr/bin/systemctl is-active --quiet "$service"; then
+    if /usr/bin/systemctl is-active --quiet "$service"; then
         log_success "Instance started successfully."
     else
         log_error "Failed to start instance. Check logs with:"
@@ -547,7 +547,7 @@ restart_instance() {
     run_privileged /usr/bin/systemctl restart "$service"
     sleep 2
     
-    if run_privileged /usr/bin/systemctl is-active --quiet "$service"; then
+    if /usr/bin/systemctl is-active --quiet "$service"; then
         log_success "Instance restarted successfully."
     else
         log_error "Failed to restart instance. Check logs."

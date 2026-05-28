@@ -15,7 +15,7 @@ This solution installs the legacy 32-bit Battlefield 1942 dedicated server using
 - **Smart Configuration**: Interactive IP detection, port conflict prevention, resource validation
 - **Performance Optimized**: CPU affinity, memory limits, I/O tuning automatically configured
 - **Secure Runtime**: Runs entirely under dedicated service account (`bf1942_user`)
-- **Modern Compatibility**: Automatically installs required i386 libraries on Ubuntu 24.04+ and Debian 12/13
+- **Modern Compatibility**: Automatically installs required i386 libraries on Ubuntu, Debian, Fedora, RHEL, and CentOS
 - **Systemd Integration**: Managed via standard `systemctl` commands
 - **Management Tools**: Comprehensive CLI tool for monitoring and managing all instances
 
@@ -28,9 +28,16 @@ bf1942-linux/
 ├── bf1942_manager.sh          # Shared management tool (all distros)
 ├── installers/
 │   ├── ubuntu/
-│   │   └── ubu_24.0.3_bfsmd_setup.sh   # Ubuntu 24.04 LTS
-│   └── debian/
-│       └── deb_12_bfsmd_setup.sh        # Debian 12 (Bookworm) / 13 (Trixie)
+│   │   ├── ubu_24.0.3_bfsmd_setup.sh   # Ubuntu 24.04 LTS
+│   │   └── ubu_22.04_bfsmd_setup.sh    # Ubuntu 22.04 LTS
+│   ├── debian/
+│   │   └── deb_12_bfsmd_setup.sh       # Debian 12 (Bookworm) / 13 (Trixie)
+│   ├── fedora/
+│   │   └── fed_40_bfsmd_setup.sh       # Fedora 40 / 41
+│   ├── rhel/
+│   │   └── rhel_9_bfsmd_setup.sh       # RHEL 9
+│   └── centos/
+│       └── centos_stream9_bfsmd_setup.sh  # CentOS Stream 9
 ├── patches/                   # Optional server bug fix patches
 ├── firewall_guide.md
 └── readme.md
@@ -52,7 +59,7 @@ bf1942-linux/
 - **Smart IP detection** - Auto-detects local and public IP addresses
 - **Network scenario support** - Works with NAT, LAN, cloud, and direct public IPs
 - **Port conflict detection** - Prevents failed installations due to port conflicts
-- **Firewall integration** - Interactive UFW configuration with security options
+- **Firewall integration** - Interactive UFW (Debian/Ubuntu) or firewalld (Fedora/RHEL/CentOS) configuration
 
 ### Security & Monitoring
 - **Input validation** - Comprehensive validation of all user inputs
@@ -162,6 +169,92 @@ sudo ./deb_12_bfsmd_setup.sh hootmeow
 ```
 
 > **Note:** The management tool (`bf1942_manager.sh`) is shared. If you have both Ubuntu and Debian servers on the same machine, one copy of the manager controls all of them.
+
+---
+
+## 🐧 Ubuntu 22.04 LTS Quick Start
+
+### 1️⃣ Download Scripts
+
+```bash
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/installers/ubuntu/ubu_22.04_bfsmd_setup.sh
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/bf1942_manager.sh
+chmod +x ubu_22.04_bfsmd_setup.sh bf1942_manager.sh
+```
+
+### 2️⃣ Install
+
+```bash
+sudo ./ubu_22.04_bfsmd_setup.sh
+```
+
+Functionally identical to Ubuntu 24.04. The only internal difference is that 22.04 uses `libcurl4:i386` (the `t64` package rename didn't happen until 24.04).
+
+---
+
+## 🎩 Fedora 40 / 41 Quick Start
+
+### 1️⃣ Download Scripts
+
+```bash
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/installers/fedora/fed_40_bfsmd_setup.sh
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/bf1942_manager.sh
+chmod +x fed_40_bfsmd_setup.sh bf1942_manager.sh
+```
+
+### 2️⃣ Install
+
+```bash
+sudo ./fed_40_bfsmd_setup.sh
+```
+
+Key differences from the Debian/Ubuntu scripts:
+- Uses `dnf` with `.i686` packages — no multiarch setup needed
+- `ncurses-compat-libs.i686` provides the legacy `libncurses5`/`libtinfo5` natively
+- `libstdc++.so.5` (GCC 3.3) is extracted from a Debian package using `ar` — works on any Linux
+- Firewall is configured via `firewalld` / `firewall-cmd` instead of UFW
+- SELinux file contexts are set automatically with `restorecon`
+- Detects `zlib.i686` vs `zlib-ng-compat.i686` at runtime (Fedora 36+ uses zlib-ng)
+
+---
+
+## 🎩 RHEL 9 Quick Start
+
+### 1️⃣ Download Scripts
+
+```bash
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/installers/rhel/rhel_9_bfsmd_setup.sh
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/bf1942_manager.sh
+chmod +x rhel_9_bfsmd_setup.sh bf1942_manager.sh
+```
+
+### 2️⃣ Install
+
+```bash
+sudo ./rhel_9_bfsmd_setup.sh
+```
+
+Same as Fedora but the script also enables EPEL and CRB (CodeReady Linux Builder) automatically before installing packages — required for some 32-bit compat libraries on RHEL.
+
+---
+
+## 🎩 CentOS Stream 9 Quick Start
+
+### 1️⃣ Download Scripts
+
+```bash
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/installers/centos/centos_stream9_bfsmd_setup.sh
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/bf1942_manager.sh
+chmod +x centos_stream9_bfsmd_setup.sh bf1942_manager.sh
+```
+
+### 2️⃣ Install
+
+```bash
+sudo ./centos_stream9_bfsmd_setup.sh
+```
+
+Same as RHEL 9 — enables EPEL and CRB, then installs i686 packages. Firewall uses `firewall-cmd`, SELinux contexts set with `restorecon`.
 
 ---
 
@@ -498,13 +591,15 @@ sudo systemctl restart bfsmd-server2.service
 
 ## 🧪 Supported Distributions
 
-| Distro | Status | Notes |
-|--------|--------|-------|
-| **Ubuntu 24.04 LTS** | ✅ Supported | Primary platform |
-| **Debian 12 (Bookworm)** | ✅ Supported | Uses `libcurl4:i386` |
-| **Debian 13 (Trixie)** | ✅ Supported | Auto-detects `libcurl4t64:i386` |
-| **Ubuntu 22.04 LTS** | 📋 Planned | Minor package adjustments may be needed |
-| **Fedora/RHEL/CentOS** | 📋 Planned | Convert apt to dnf/yum |
+| Distro | Status | Script | Notes |
+|--------|--------|--------|-------|
+| **Ubuntu 24.04 LTS** | ✅ Supported | `installers/ubuntu/ubu_24.0.3_bfsmd_setup.sh` | Primary platform |
+| **Ubuntu 22.04 LTS** | ✅ Supported | `installers/ubuntu/ubu_22.04_bfsmd_setup.sh` | Uses `libcurl4:i386` |
+| **Debian 12 (Bookworm)** | ✅ Supported | `installers/debian/deb_12_bfsmd_setup.sh` | Uses `libcurl4:i386` |
+| **Debian 13 (Trixie)** | ✅ Supported | `installers/debian/deb_12_bfsmd_setup.sh` | Auto-detects `libcurl4t64:i386` |
+| **Fedora 40 / 41** | ✅ Supported | `installers/fedora/fed_40_bfsmd_setup.sh` | dnf, firewalld, SELinux |
+| **RHEL 9** | ✅ Supported | `installers/rhel/rhel_9_bfsmd_setup.sh` | Enables EPEL + CRB automatically |
+| **CentOS Stream 9** | ✅ Supported | `installers/centos/centos_stream9_bfsmd_setup.sh` | Enables EPEL + CRB automatically |
 
 ---
 

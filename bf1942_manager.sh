@@ -110,9 +110,13 @@ list_instances() {
     if [ $found -eq 0 ]; then
         log_warn "No instances found."
         echo ""
-        echo "To create an instance, run:"
+        echo "To create an instance, pick the script for your distro:"
         echo "  sudo ./installers/ubuntu/ubu_24.0.3_bfsmd_setup.sh [instance_name]"
-        echo "  sudo ./installers/debian/deb_12_bfsmd_setup.sh [instance_name]"
+        echo "  sudo ./installers/ubuntu/ubu_22.04_bfsmd_setup.sh  [instance_name]"
+        echo "  sudo ./installers/debian/deb_12_bfsmd_setup.sh     [instance_name]"
+        echo "  sudo ./installers/fedora/fed_40_bfsmd_setup.sh     [instance_name]"
+        echo "  sudo ./installers/rhel/rhel_9_bfsmd_setup.sh       [instance_name]"
+        echo "  sudo ./installers/centos/centos_stream9_bfsmd_setup.sh [instance_name]"
     fi
     
     echo ""

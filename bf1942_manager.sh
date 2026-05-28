@@ -111,7 +111,8 @@ list_instances() {
         log_warn "No instances found."
         echo ""
         echo "To create an instance, run:"
-        echo "  sudo ./bf1942_unified_setup.sh [instance_name]"
+        echo "  sudo ./installers/ubuntu/ubu_24.0.3_bfsmd_setup.sh [instance_name]"
+        echo "  sudo ./installers/debian/deb_12_bfsmd_setup.sh [instance_name]"
     fi
     
     echo ""

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git mv *)",
+      "Bash(mkdir -p installers/ubuntu)",
+      "Bash(rmdir ubuntu *)",
+      "Bash(rmdir debian *)",
+      "Bash(mkdir -p installers/debian)"
+    ]
+  }
+}

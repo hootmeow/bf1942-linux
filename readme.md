@@ -70,7 +70,7 @@ This quick start guide targets Ubuntu 24.04 LTS. For other distributions, please
 wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/ubu_24.0.3_bfsmd_setup.sh
 
 # Download management tool
-wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main//ubuntu/bf1942_manager.sh
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/bf1942_manager.sh
 
 # Make executable
 chmod +x ubu_24.0.3_bfsmd_setup.sh bf1942_manager.sh

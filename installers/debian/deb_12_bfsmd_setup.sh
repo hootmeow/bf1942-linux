@@ -201,8 +201,12 @@ check_resources() {
     local available_space_gb=$((available_space_kb / 1024 / 1024))
 
     if [ "$available_space_gb" -lt 5 ]; then
-        log_error "Insufficient disk space: ${available_space_gb}GB (minimum: 5GB)"
-        return 1
+        log_warn "Low disk space: ${available_space_gb}GB available (recommended: 5GB)"
+        read -r -p "Continue anyway? [y/N] " confirm
+        if [[ ! "$confirm" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+            log_info "Installation cancelled."
+            exit 0
+        fi
     else
         log_success "Disk space: ${available_space_gb}GB available"
     fi

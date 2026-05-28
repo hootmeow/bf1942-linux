@@ -11,6 +11,8 @@
 
 set -euo pipefail
 
+VERSION="2.0"
+
 BF_USER="bf1942_user"
 BF_BASE="/home/${BF_USER}/instances"
 BF_STANDALONE="/home/${BF_USER}/bf1942"

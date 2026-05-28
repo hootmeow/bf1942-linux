@@ -15,9 +15,28 @@ This solution installs the legacy 32-bit Battlefield 1942 dedicated server using
 - **Smart Configuration**: Interactive IP detection, port conflict prevention, resource validation
 - **Performance Optimized**: CPU affinity, memory limits, I/O tuning automatically configured
 - **Secure Runtime**: Runs entirely under dedicated service account (`bf1942_user`)
-- **Modern Compatibility**: Automatically installs required i386 libraries on Ubuntu 24.04+ / Debian 12+
+- **Modern Compatibility**: Automatically installs required i386 libraries on Ubuntu 24.04+ and Debian 12/13
 - **Systemd Integration**: Managed via standard `systemctl` commands
 - **Management Tools**: Comprehensive CLI tool for monitoring and managing all instances
+
+---
+
+## 📁 Repository Structure
+
+```
+bf1942-linux/
+├── bf1942_manager.sh          # Shared management tool (all distros)
+├── installers/
+│   ├── ubuntu/
+│   │   └── ubu_24.0.3_bfsmd_setup.sh   # Ubuntu 24.04 LTS
+│   └── debian/
+│       └── deb_12_bfsmd_setup.sh        # Debian 12 (Bookworm) / 13 (Trixie)
+├── patches/                   # Optional server bug fix patches
+├── firewall_guide.md
+└── readme.md
+```
+
+`bf1942_manager.sh` lives at the root and works with servers installed by any distro's setup script — you only ever need one copy.
 
 ---
 
@@ -57,20 +76,18 @@ View all ports: `./bf1942_manager.sh ports`
 
 ---
 
-## 🚀 Quick Start (Ubuntu 24.0.3 LTS)
+## 🚀 Quick Start (Ubuntu 24.04 LTS)
 
 > **Prerequisite:** User with **sudo** privileges
-
-This quick start guide targets Ubuntu 24.04 LTS. For other distributions, please use the dedicated scripts found in their respective directories, which contain the necessary version-specific details.
 
 ### 1️⃣ Download Scripts
 
 ```bash
-# Download main setup script
-wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/ubuntu/ubu_24.0.3_bfsmd_setup.sh
+# Download setup script
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/installers/ubuntu/ubu_24.0.3_bfsmd_setup.sh
 
 # Download management tool
-wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main//ubuntu/bf1942_manager.sh
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/bf1942_manager.sh
 
 # Make executable
 chmod +x ubu_24.0.3_bfsmd_setup.sh bf1942_manager.sh
@@ -97,16 +114,54 @@ sudo ./ubu_24.0.3_bfsmd_setup.sh
 ### 3️⃣ Create Additional Instances (BFSMD Only)
 
 ```bash
-# Add more servers with different names 
+# Add more servers with different names
 sudo ./ubu_24.0.3_bfsmd_setup.sh server2
 sudo ./ubu_24.0.3_bfsmd_setup.sh hootmeow
-
+```
 
 Each instance:
 - Gets unique ports automatically
 - Runs independently
 - Can be managed separately
 - Has dedicated CPU cores (when available)
+
+---
+
+## 🐧 Debian 12 / 13 Quick Start
+
+> **Prerequisite:** User with **sudo** privileges
+
+### 1️⃣ Download Scripts
+
+```bash
+# Download setup script
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/installers/debian/deb_12_bfsmd_setup.sh
+
+# Download management tool
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/bf1942_manager.sh
+
+# Make executable
+chmod +x deb_12_bfsmd_setup.sh bf1942_manager.sh
+```
+
+### 2️⃣ Install Your First Server
+
+```bash
+sudo ./deb_12_bfsmd_setup.sh
+```
+
+The Debian script automatically detects which version of `libcurl4` your system uses — Debian 12 (Bookworm) and Debian 13 (Trixie) have different package names due to the `time_t64` ABI transition, and the script handles both without any manual changes.
+
+Everything else — modes, IP selection, port management, credentials — works identically to the Ubuntu version.
+
+### 3️⃣ Create Additional Instances (BFSMD Only)
+
+```bash
+sudo ./deb_12_bfsmd_setup.sh server2
+sudo ./deb_12_bfsmd_setup.sh hootmeow
+```
+
+> **Note:** The management tool (`bf1942_manager.sh`) is shared. If you have both Ubuntu and Debian servers on the same machine, one copy of the manager controls all of them.
 
 ---
 
@@ -156,6 +211,8 @@ Create secure admin accounts and disable defaults:
 ---
 
 ## 🛠️ Management Commands
+
+`bf1942_manager.sh` is at the repository root and manages all instances regardless of which distro's setup script was used to create them.
 
 ### Using bf1942_manager.sh
 
@@ -443,10 +500,10 @@ sudo systemctl restart bfsmd-server2.service
 
 | Distro | Status | Notes |
 |--------|--------|-------|
-| **Ubuntu 24.04 LTS** | ✅ Tested | Primary platform |
+| **Ubuntu 24.04 LTS** | ✅ Supported | Primary platform |
+| **Debian 12 (Bookworm)** | ✅ Supported | Uses `libcurl4:i386` |
+| **Debian 13 (Trixie)** | ✅ Supported | Auto-detects `libcurl4t64:i386` |
 | **Ubuntu 22.04 LTS** | 📋 Planned | Minor package adjustments may be needed |
-| **Debian 12 (Bookworm)** | 📋 Planned | Same multiarch as Ubuntu |
-| **Debian 11 (Bullseye)** | 📋 Planned | Should work with adjustments |
 | **Fedora/RHEL/CentOS** | 📋 Planned | Convert apt to dnf/yum |
 
 ---
@@ -485,7 +542,7 @@ The patches folder contains Python scripts to improve various server bugs. Pleas
 ## 🤝 Contributing
 
 Contributions welcome! Please:
-1. Test your changes on Ubuntu 24.04
+1. Test your changes on the relevant distribution(s)
 2. Update documentation
 3. Follow existing code style
 4. Submit pull requests

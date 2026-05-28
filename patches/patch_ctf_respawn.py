@@ -3,8 +3,8 @@
 #  CTF Flag Respawn Fix
 # ==============================================================================
 #
-# This Python script automates the binary patch required to fix the "CTF Flag 
-# Respawn" bug, where the respawn counter fails to reset if a flag is picked 
+# This Python script automates the binary patch required to fix the "CTF Flag
+# Respawn" bug, where the respawn counter fails to reset if a flag is picked
 # up or dropped.
 #
 # Original Patch Credit: UUUZbf (https://github.com/uuuzbf/bf1942-patches)
@@ -12,26 +12,31 @@
 # ------------------------------------------------------------------------------
 #  IMPORTANT PREREQUISITES
 # ------------------------------------------------------------------------------
-# 1. Stop the Server: Do NOT run this patch while the bf1942 server process 
+# 1. Stop the Server: Do NOT run this patch while the bf1942 server process
 #    is running.
-# 2. Backup Files: It is highly recommended to backup your 
+# 2. Backup Files: It is highly recommended to backup your
 #    'bf1942_lnxded.static' and 'bf1942_lnxded.dynamic' files before proceeding.
 #
 # ------------------------------------------------------------------------------
 #  USAGE INSTRUCTIONS
 # ------------------------------------------------------------------------------
-# 1. Save this file as 'patch_ctf_respawn.py' inside your server's installation 
-#    directory (e.g., ~/bf1942/).
+# Run the script using Python 3, passing the path to your server instance:
 #
-# 2. Run the script using Python 3:
-#    python3 patch_ctf_respawn.py
+#   Standalone server:
+#     python3 patch_ctf_respawn.py /home/bf1942_user/bf1942
 #
-# 3. The script will output [SUCCESS] if the patch was applied correctly.
-#    You may then restart your server.
+#   BFSMD instance (replace <name> with your instance name):
+#     python3 patch_ctf_respawn.py /home/bf1942_user/instances/<name>
+#
+#   If no path is given, the current working directory is used.
+#
+# The script will output [SUCCESS] if the patch was applied correctly.
+# You may then restart your server.
 #
 # ==============================================================================
 
 import os
+import sys
 import binascii
 
 def patch_file(filename, offset, original_hex, new_hex):
@@ -105,5 +110,13 @@ dynamic_new  = "56 50 ff 53 68 8b 5d 08 8b 43 4c 8b 80 70 01 00 00 89 83 1c 01 0
 # ==============================================================================
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        server_dir = sys.argv[1]
+        if not os.path.isdir(server_dir):
+            print(f"[ERROR] Directory not found: {server_dir}")
+            sys.exit(1)
+        os.chdir(server_dir)
+        print(f"Working in: {os.getcwd()}\n")
+
     patch_file(static_file, static_offset, static_orig, static_new)
     patch_file(dynamic_file, dynamic_offset, dynamic_orig, dynamic_new)

@@ -3,7 +3,7 @@
 #  CTF flags falling trough map objects
 # ==============================================================================
 #
-# This Python script automates the binary patch required to fix the "CTF Flag 
+# This Python script automates the binary patch required to fix the "CTF Flag
 # falling trough map objects" bug, where the  flags always fall onto the map terrain,
 # falling trough any buildings the player might stand on.
 #
@@ -12,27 +12,32 @@
 # ------------------------------------------------------------------------------
 #  IMPORTANT PREREQUISITES
 # ------------------------------------------------------------------------------
-# 1. Stop the Server: Do NOT run this patch while the bf1942 server process 
+# 1. Stop the Server: Do NOT run this patch while the bf1942 server process
 #    is running.
-# 2. Backup Files: It is highly recommended to backup your 
+# 2. Backup Files: It is highly recommended to backup your
 #    'bf1942_lnxded.static' and 'bf1942_lnxded.dynamic' files before proceeding.
 #
 # ------------------------------------------------------------------------------
 #  USAGE INSTRUCTIONS
 # ------------------------------------------------------------------------------
-# 1. Save this file as 'patch_ctf_flags_map.py' inside your server's installation 
-#    directory (e.g., ~/bf1942/).
+# Run the script using Python 3, passing the path to your server instance:
 #
-# 2. Run the script using Python 3:
-#    python3 patch_ctf_flags_map.py
+#   Standalone server:
+#     python3 patch_ctf_flags_map.py /home/bf1942_user/bf1942
 #
-# 3. The script will output [SUCCESS] if the patch was applied correctly.
-#    You may then restart your server.
+#   BFSMD instance (replace <name> with your instance name):
+#     python3 patch_ctf_flags_map.py /home/bf1942_user/instances/<name>
+#
+#   If no path is given, the current working directory is used.
+#
+# The script will output [SUCCESS] if the patch was applied correctly.
+# You may then restart your server.
 #
 # ==============================================================================
 
 
 import os
+import sys
 import binascii
 
 def patch_file(filename, offset, original_hex, new_hex):
@@ -106,5 +111,13 @@ dynamic_new  = "d9 54 24 04 c7 04 24 00 02 00 02 8B 75 0C 8B 06 56 FF 50 3C 89 0
 # ==============================================================================
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        server_dir = sys.argv[1]
+        if not os.path.isdir(server_dir):
+            print(f"[ERROR] Directory not found: {server_dir}")
+            sys.exit(1)
+        os.chdir(server_dir)
+        print(f"Working in: {os.getcwd()}\n")
+
     patch_file(static_file, static_offset, static_orig, static_new)
     patch_file(dynamic_file, dynamic_offset, dynamic_orig, dynamic_new)

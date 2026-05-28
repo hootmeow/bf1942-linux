@@ -1,5 +1,19 @@
 # 🔥 Firewall Configuration Guide
 
+## What Firewall Does My Distro Use?
+
+| Distro | Firewall Tool | Configured By |
+|--------|--------------|---------------|
+| Ubuntu 24.04 / 22.04 | UFW | `ufw` |
+| Debian 12 / 13 | UFW | `ufw` |
+| Fedora 40 / 41 | firewalld | `firewall-cmd` |
+| RHEL 9 | firewalld | `firewall-cmd` |
+| CentOS Stream 9 | firewalld | `firewall-cmd` |
+
+The installer detects your distro and uses the correct tool automatically. This guide covers both.
+
+---
+
 ## What Ports Does My Server Use?
 
 Each BF1942 instance uses **3 ports** (BFSMD mode) or **2 ports** (Standalone mode):
@@ -11,7 +25,7 @@ Ports are calculated from your instance name:
 Instance Hash = hash(instance_name) % 100
 Game Port     = 14567 + Hash
 Query Port    = 23000 + Hash
-Mgmt Port     = 14667 + Hash
+Mgmt Port     = 14667 + Hash  (BFSMD only)
 ```
 
 ### Examples
@@ -32,24 +46,27 @@ Mgmt Port     = 14667 + Hash
 
 ## During Installation
 
-When you install a server, you'll see:
+The installer will ask:
 
 ```
-Firewall Configuration
+# Ubuntu / Debian:
 Configure UFW firewall rules? [y/N]
+
+# Fedora / RHEL / CentOS:
+Configure firewalld rules? [y/N]
 ```
 
 ### If you answer "y" (Yes):
 
 **For Standalone servers:**
-- Opens Game port (14567/udp)
-- Opens Query port (23000/udp)
-- Done!
+- Opens Game port (UDP)
+- Opens Query port (UDP)
+- Done
 
 **For BFSMD servers:**
 - Opens Game port automatically
 - Opens Query port automatically
-- **Then asks about Management port:**
+- **Then asks about the Management port:**
 
 ```
 Management Port Security:
@@ -60,9 +77,9 @@ Choice [1-3, default: 1]:
 ```
 
 ### If you answer "n" (No):
-- No firewall rules created
-- You configure manually later
-- Good if: Using cloud firewall, custom setup
+- No firewall rules are created
+- You configure manually later (see sections below)
+- Good if: using a cloud firewall, custom setup
 
 ---
 
@@ -70,225 +87,215 @@ Choice [1-3, default: 1]:
 
 ### Option 1: Open to All IPs ✅ Easiest
 
-**What happens:**
+**UFW:**
 ```bash
-ufw allow 14700/tcp
+sudo ufw allow 14700/tcp
 ```
 
-**Means:**
-- Anyone on the internet can connect to BFRM on this port
-- Still protected by username/password
-- Similar to a public website with login
+**firewalld:**
+```bash
+sudo firewall-cmd --permanent --add-port=14700/tcp
+sudo firewall-cmd --reload
+```
 
-**Best for:**
-- Quick setup
-- Testing
-- Behind another firewall (router, cloud security group)
-- Multiple admins from different locations
+**Means:** Anyone on the internet can attempt to connect to BFRM on this port. Still protected by password.
 
-**Security:**
-- 🟡 Medium - relies on password strength
-- ⚠️ Exposed to brute-force attempts
-- ✅ Still requires valid credentials
+**Best for:** Quick setup, testing, behind a cloud firewall, multiple admins from different locations.
+
+**Security:** 🟡 Medium — relies on password strength, exposed to brute-force attempts.
 
 ---
 
 ### Option 2: Restrict to Specific IP 🔒 More Secure
 
-**What happens:**
+**UFW:**
 ```bash
-Enter trusted IP address: 203.0.113.45
-ufw allow from 203.0.113.45 to any port 14700 proto tcp
+sudo ufw allow from 203.0.113.45 to any port 14700 proto tcp
 ```
 
-**Means:**
-- ONLY that specific IP can connect
-- All other IPs are blocked at firewall level
-- Password protection is backup
+**firewalld:**
+```bash
+sudo firewall-cmd --permanent --add-rich-rule="rule family='ipv4' source address='203.0.113.45' port protocol='tcp' port='14700' accept"
+sudo firewall-cmd --reload
+```
 
-**Best for:**
-- Static admin IP (home internet, office)
-- Single admin
-- Known IP addresses
+**Means:** Only that specific IP can connect. All others blocked at the firewall level before they even reach the password prompt.
 
-**Security:**
-- 🟢 Good - two layers (firewall + password)
-- ✅ Blocks unauthorized connection attempts
-- ⚠️ Need to update if your IP changes
+**Best for:** Static admin IP, single admin location.
 
-**How to update later:**
+**Security:** 🟢 Good — two layers (firewall + password). Update when your IP changes.
+
+**How to update later (UFW):**
+```bash
+sudo ufw status numbered         # find the rule number
+sudo ufw delete [number]
+sudo ufw allow from NEW_IP to any port 14700 proto tcp
+```
+
+**How to update later (firewalld):**
 ```bash
 # Remove old rule
-sudo ufw status numbered
-sudo ufw delete [number]
-
+sudo firewall-cmd --permanent --remove-rich-rule="rule family='ipv4' source address='OLD_IP' port protocol='tcp' port='14700' accept"
 # Add new rule
-sudo ufw allow from NEW_IP to any port 14700 proto tcp
+sudo firewall-cmd --permanent --add-rich-rule="rule family='ipv4' source address='NEW_IP' port protocol='tcp' port='14700' accept"
+sudo firewall-cmd --reload
 ```
 
 ---
 
 ### Option 3: SSH Tunnel 🔐 Most Secure
 
-**What happens:**
-```
-No firewall rule created for management port
-```
-
-**Means:**
-- Management port NOT accessible from internet
-- Must create SSH tunnel to access
-- Zero attack surface
-
-**Best for:**
-- Maximum security
-- Experienced users
-- Remote management
-
-**Security:**
-- 🟢 Excellent - no direct access
-- ✅ Uses SSH encryption
-- ✅ No exposure to internet
+**What happens:** No firewall rule is created for the management port at all.
 
 **How to use:**
 ```bash
-# On your computer (one-time per session):
+# On your local machine (run once per session):
 ssh -L 14700:localhost:14700 your-user@your-server-ip
 
-# Leave that terminal open
-# In BFRM, connect to: localhost:14700
+# Leave that terminal open, then point BFRM at: localhost:14700
 ```
 
-**Pros:**
-- Most secure option
-- All traffic encrypted
-- No management port exposed
+**Best for:** Maximum security, experienced users, servers directly exposed to the internet.
 
-**Cons:**
-- Requires SSH access
-- Extra step to connect
-- Need SSH tunnel running
+**Security:** 🟢 Excellent — zero direct exposure, all traffic encrypted via SSH.
 
 ---
 
 ## Quick Decision Guide
 
-**Choose Option 1 if:**
-- ✅ First time setting up
-- ✅ Want simplest setup
-- ✅ Behind cloud firewall already
-- ✅ Multiple admins, different IPs
-- ✅ Don't mind some exposure
-
-**Choose Option 2 if:**
-- ✅ Have static IP address
-- ✅ Single admin location
-- ✅ Want better security
-- ✅ Comfortable updating firewall
-
-**Choose Option 3 if:**
-- ✅ Maximum security needed
-- ✅ Comfortable with SSH
-- ✅ Want zero exposure
-- ✅ Already using SSH anyway
+| Situation | Recommended Option |
+|-----------|-------------------|
+| First-time setup / testing | Option 1 |
+| Home server behind router | Option 1 or 2 |
+| Static admin IP | Option 2 |
+| Cloud server (AWS, DigitalOcean, etc.) | Option 2 or 3 |
+| Maximum security / experienced user | Option 3 |
 
 ---
 
-## Common Scenarios
+## Manual Configuration
 
-### Home Server (Behind Router)
-
-**Recommendation:** Option 1 or 2
-
-Your router firewall provides first layer of protection. You'd need to port forward anyway, so Option 1 is often fine. Option 2 if you have static IP.
-
-**Router Setup:**
-- Forward Game port (UDP) → Local IP
-- Forward Query port (UDP) → Local IP
-- Forward Mgmt port (TCP) → Local IP (if using Option 1 or 2)
-
-### Cloud Server (AWS, DigitalOcean, etc.)
-
-**Recommendation:** Option 2 or 3
-
-Cloud instances are directly exposed. Use Option 2 (restrict to your IP) or Option 3 (SSH tunnel).
-
-**Cloud Firewall:**
-- Allow Game port (UDP) from 0.0.0.0/0
-- Allow Query port (UDP) from 0.0.0.0/0
-- Allow Mgmt port (TCP) from YOUR_IP only (or don't allow)
-
-### VPS with No Extra Firewall
-
-**Recommendation:** Option 2 or 3
-
-You're the only firewall. Don't use Option 1 unless you understand the risk.
-
----
-
-## Changing Your Mind Later
-
-### Switch from Open (1) to Restricted (2):
+### Ubuntu / Debian (UFW)
 
 ```bash
-# Find the rule number
+# Check current rules
 sudo ufw status numbered
 
-# Delete the open rule
-sudo ufw delete [number]
+# Open a port to all
+sudo ufw allow 14567/udp
+sudo ufw allow 14700/tcp
 
-# Add restricted rule
+# Restrict a port to one IP
+sudo ufw allow from YOUR_IP to any port 14700 proto tcp
+
+# Remove a rule
+sudo ufw delete [rule_number]
+
+# Enable / disable UFW
+sudo ufw enable
+sudo ufw disable
+```
+
+### Fedora / RHEL / CentOS (firewalld)
+
+```bash
+# Check current rules
+sudo firewall-cmd --list-all
+
+# Open a port to all
+sudo firewall-cmd --permanent --add-port=14567/udp
+sudo firewall-cmd --permanent --add-port=14700/tcp
+sudo firewall-cmd --reload
+
+# Restrict a port to one IP
+sudo firewall-cmd --permanent --add-rich-rule="rule family='ipv4' source address='YOUR_IP' port protocol='tcp' port='14700' accept"
+sudo firewall-cmd --reload
+
+# Remove a port rule
+sudo firewall-cmd --permanent --remove-port=14700/tcp
+sudo firewall-cmd --reload
+
+# Remove a rich rule
+sudo firewall-cmd --permanent --remove-rich-rule="rule family='ipv4' source address='YOUR_IP' port protocol='tcp' port='14700' accept"
+sudo firewall-cmd --reload
+
+# Check if firewalld is running
+sudo systemctl status firewalld
+```
+
+---
+
+## Switching Options Later
+
+### Open → Restricted (UFW)
+```bash
+sudo ufw status numbered
+sudo ufw delete [rule_number_for_open_rule]
 sudo ufw allow from YOUR_IP to any port 14700 proto tcp
 ```
 
-### Switch from Restricted (2) to Tunnel (3):
-
+### Open → Restricted (firewalld)
 ```bash
-# Delete the rule
-sudo ufw status numbered
-sudo ufw delete [number]
-
-# Now use SSH tunnel
-ssh -L 14700:localhost:14700 user@server
+sudo firewall-cmd --permanent --remove-port=14700/tcp
+sudo firewall-cmd --permanent --add-rich-rule="rule family='ipv4' source address='YOUR_IP' port protocol='tcp' port='14700' accept"
+sudo firewall-cmd --reload
 ```
 
-### Switch from Tunnel (3) to Open (1):
-
+### Restricted → SSH Tunnel (UFW)
 ```bash
-# Add the rule
+sudo ufw status numbered
+sudo ufw delete [rule_number]
+# Management port is now closed — use SSH tunnel to connect
+```
+
+### Restricted → SSH Tunnel (firewalld)
+```bash
+sudo firewall-cmd --permanent --remove-rich-rule="rule family='ipv4' source address='YOUR_IP' port protocol='tcp' port='14700' accept"
+sudo firewall-cmd --reload
+```
+
+### Tunnel → Open (UFW)
+```bash
 sudo ufw allow 14700/tcp
+```
+
+### Tunnel → Open (firewalld)
+```bash
+sudo firewall-cmd --permanent --add-port=14700/tcp
+sudo firewall-cmd --reload
 ```
 
 ---
 
 ## Testing Your Configuration
 
-### Check Firewall Rules
+### Check What's Listening
+```bash
+sudo ss -tulnp | grep 14700
+```
+
+### Check Firewall Status
+
+**UFW:**
 ```bash
 sudo ufw status numbered
 ```
 
-### Check Port Listening
+**firewalld:**
 ```bash
-# Should show bfsmd listening on management port
-sudo ss -tlnp | grep 14700
+sudo firewall-cmd --list-all
 ```
 
-### Test Connection
-
-**From another machine:**
+### Test Connection From Another Machine
 ```bash
-# Should connect (if Option 1) or timeout (if Option 2/3)
+# Should connect (Option 1) or time out (Option 2/3)
 telnet your-server-ip 14700
 ```
 
 **If using SSH tunnel:**
 ```bash
-# Create tunnel
-ssh -L 14700:localhost:14700 user@server
-
-# Test locally
-telnet localhost 14700
+ssh -L 14700:localhost:14700 user@server   # run first
+telnet localhost 14700                      # then test locally
 ```
 
 ---
@@ -296,30 +303,22 @@ telnet localhost 14700
 ## Security Best Practices
 
 1. **Change default credentials immediately** after first BFRM login
-2. **Use strong unique passwords** - at least 12+ characters with mixed case, numbers, symbols
-3. **Monitor logs** for unauthorized attempts:
+2. **Use strong passwords** — 12+ characters with mixed case, numbers, symbols
+3. **Monitor for unauthorized attempts:**
    ```bash
    journalctl -u bfsmd-server1.service | grep -i "failed\|denied"
    ```
-4. **Consider SSH tunnel** even if using Option 1 or 2
-5. **Update firewall rules** if your IP changes (Option 2)
-6. **Run security audit regularly**:
+4. **Run security audit regularly:**
    ```bash
    ./bf1942_manager.sh security
    ```
+5. **Consider SSH tunnel** even if using Option 1 or 2 for day-to-day management
 
 ---
 
 ## TL;DR
 
-- **Ports are assigned automatically** based on instance name
-- **Script configures firewall** if you choose yes
-- **Three security levels** for management port
-- **Can change later** if needed
-- **Use `./bf1942_manager.sh ports`** to see your ports
-
-**Most users should:**
-- Home server behind router → Option 1 or 2
-- Cloud server → Option 2 or 3
-- When in doubt → Choose Option 2
-
+- Ports are assigned automatically based on instance name — use `./bf1942_manager.sh ports` to see them
+- Ubuntu/Debian use **UFW**, Fedora/RHEL/CentOS use **firewalld** — the installer handles this automatically
+- Three security levels for the management port: open / restricted to IP / SSH tunnel only
+- When in doubt: home server → Option 1 or 2, cloud server → Option 2 or 3

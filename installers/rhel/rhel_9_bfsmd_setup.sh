@@ -179,8 +179,12 @@ check_resources() {
     local total_ram_mb=$((total_ram_kb / 1024))
 
     if [ "$total_ram_mb" -lt 1024 ]; then
-        log_error "Insufficient RAM: ${total_ram_mb}MB (minimum: 1024MB)"
-        return 1
+        log_warn "Low RAM: ${total_ram_mb}MB (recommended: 1024MB)"
+        read -r -p "Continue anyway? [y/N] " confirm
+        if [[ ! "$confirm" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+            log_info "Installation cancelled."
+            exit 0
+        fi
     else
         log_success "RAM: ${total_ram_mb}MB"
     fi

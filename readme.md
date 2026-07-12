@@ -201,6 +201,52 @@ sudo systemctl restart bfsmd-server1.service
 
 ---
 
+## 📊 XML Event Logging
+
+The game server can log every in-game event (kills, scores, round stats) to XML files — the data source for player-statistics tools. Logs are written per round to:
+
+```
+<server-root>/mods/bf1942/logs/ev_<port>-<date>_<time>.xml
+```
+
+**New installs:** event logging is enabled automatically by the setup scripts (`game.serverEventLogging 1`, compression off).
+
+### Enabling Logging on Existing Servers
+
+Servers installed with an older version of the setup scripts have logging disabled. To enable it without touching any other settings:
+
+```bash
+wget https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/patches/patch-existing-logging.sh
+chmod +x patch-existing-logging.sh
+
+sudo ./patch-existing-logging.sh                  # auto-detect installs under /home/bf1942_user
+sudo ./patch-existing-logging.sh /path/to/server  # or pass server root(s) explicitly
+```
+
+The script sets `game.serverEventLogging 1` and `game.serverEventLogCompression 0` in `serversettings.con` and (on BFSMD installs) `servermanager.con`, and creates the `mods/bf1942/logs` folder. Ports, server name, credentials, and map rotation are left exactly as they are, and every edited file is backed up first as `<name>.bak-logging-<timestamp>`.
+
+Then restart the server to apply:
+
+```bash
+sudo systemctl restart bf1942.service            # standalone
+sudo systemctl restart bfsmd-<name>.service      # BFSMD instance
+```
+
+**To do it by hand instead**, edit `mods/bf1942/settings/serversettings.con` (and `servermanager.con` on BFSMD installs) and set:
+
+```text
+game.serverEventLogging 1
+game.serverEventLogCompression 0
+```
+
+### Logging Notes
+
+- **Keep compression off.** Compressed `.zxml` logs are flushed to disk in deferred blocks — a server stop or crash can lose the entire round, and stats tools expect plain `.xml`.
+- One file is written per round and closed with `</bf:log>` when the round ends. Stopping or restarting the server kills the game process hard, so the file for an in-progress round is always left truncated — only completed rounds produce well-formed logs.
+- The `logs` folder is created automatically by the engine on first start if missing.
+
+---
+
 ## 🔒 Security
 
 ### Post-Installation Checklist
@@ -333,6 +379,7 @@ bf1942-linux/
 │   └── centos/
 │       └── centos_stream9_bfsmd_setup.sh
 ├── patches/
+│   └── patch-existing-logging.sh   # Enable XML event logging on existing installs
 ├── firewall_guide.md
 └── readme.md
 ```
@@ -341,7 +388,7 @@ bf1942-linux/
 
 ## 🛠️ Applying Patches
 
-The `patches/` folder contains Python scripts that fix known server bugs. See each patch file for details and application instructions.
+The `patches/` folder contains scripts that fix known server bugs — including `patch-existing-logging.sh` for enabling XML event logging on servers installed before it became the default (see [XML Event Logging](#-xml-event-logging)). See each patch file for details and application instructions.
 
 ---
 

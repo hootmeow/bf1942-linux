@@ -522,6 +522,9 @@ else
     GAME_PORT=$((14567 + INSTANCE_ID))
     QUERY_PORT=$((23000 + INSTANCE_ID))
     MGMT_PORT=$((14667 + INSTANCE_ID))
+    LAN_PORT=$((22000 + INSTANCE_ID))
+    ASE_PORT=$((14690 + INSTANCE_ID))
+    CONSOLE_PORT=$((4711 + INSTANCE_ID))
 
     if ! validate_ports "$GAME_PORT" "$QUERY_PORT" "$MGMT_PORT"; then
         log_error "Port conflict detected. Try a different instance name."
@@ -791,16 +794,64 @@ fi
 
 if [ "$INSTALL_MODE" = "bfsmd" ]; then
     SETTINGS_DIR="${BF_ROOT}/mods/bf1942/settings"
-    if [ -d "$SETTINGS_DIR" ] && [ -f "${SETTINGS_DIR}/ServerSettings.con" ]; then
+    # fixinstall.sh lower-cases every filename, so the settings files are
+    # serversettings.con / servermanager.con from here on.
+    if [ -d "$SETTINGS_DIR" ] && [ -f "${SETTINGS_DIR}/serversettings.con" ]; then
         log_info "Updating server settings..."
 
-        cp "${SETTINGS_DIR}/ServerSettings.con" "${SETTINGS_DIR}/ServerSettings.con.bak"
+        cp "${SETTINGS_DIR}/serversettings.con" "${SETTINGS_DIR}/serversettings.con.bak"
 
-        sed -i "s/game\.serverPort [0-9]*/game.serverPort ${GAME_PORT}/" "${SETTINGS_DIR}/ServerSettings.con"
-        sed -i "s/game\.serverName .*/game.serverName \"BF1942 ${INSTANCE_NAME}\"/" "${SETTINGS_DIR}/ServerSettings.con"
+        sed -i "s/game\.serverPort [0-9]*/game.serverPort ${GAME_PORT}/" "${SETTINGS_DIR}/serversettings.con"
+        sed -i "s/game\.serverName .*/game.serverName \"BF1942 ${INSTANCE_NAME}\"/" "${SETTINGS_DIR}/serversettings.con"
+        sed -i "s/game\.serverEventLogging [0-9]*/game.serverEventLogging 1/" "${SETTINGS_DIR}/serversettings.con"
+        sed -i "s/game\.serverEventLogCompression [0-9]*/game.serverEventLogCompression 0/" "${SETTINGS_DIR}/serversettings.con"
 
         log_success "Server settings updated"
     fi
+
+    # servermanager.con is the file BFSMD actually reads when launching the
+    # game server. Without these edits every instance keeps the default ports
+    # (14567/23000/22000/14690/4711) and collides with other servers on the
+    # box, and BFSMD refuses to start an Internet server while the remote
+    # console still has the default UserName/Password credentials.
+    SM_CON="${SETTINGS_DIR}/servermanager.con"
+    if [ -f "$SM_CON" ]; then
+        log_info "Updating server manager settings..."
+
+        cp "$SM_CON" "${SM_CON}.bak"
+
+        CONSOLE_PASSWORD=$(dd if=/dev/urandom bs=64 count=1 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 12)
+
+        sed -i "s/game\.serverPort [0-9]*/game.serverPort ${GAME_PORT}/" "$SM_CON"
+        sed -i "s/game\.gameSpyPort [0-9]*/game.gameSpyPort ${QUERY_PORT}/" "$SM_CON"
+        sed -i "s/game\.gameSpyLANPort [0-9]*/game.gameSpyLANPort ${LAN_PORT}/" "$SM_CON"
+        sed -i "s/game\.ASEPort [0-9]*/game.ASEPort ${ASE_PORT}/" "$SM_CON"
+        sed -i "s/manager\.consolePort [0-9]*/manager.consolePort ${CONSOLE_PORT}/" "$SM_CON"
+        sed -i "s/game\.serverName .*/game.serverName \"BF1942 ${INSTANCE_NAME}\"/" "$SM_CON"
+        sed -i "s/manager\.consoleUsername .*/manager.consoleUsername \"bfadmin\"/" "$SM_CON"
+        sed -i "s/manager\.consolePassword .*/manager.consolePassword \"${CONSOLE_PASSWORD}\"/" "$SM_CON"
+        sed -i "s/game\.serverEventLogging [0-9]*/game.serverEventLogging 1/" "$SM_CON"
+        sed -i "s/game\.serverEventLogCompression [0-9]*/game.serverEventLogCompression 0/" "$SM_CON"
+
+        echo "Remote console (instance ${INSTANCE_NAME}): port ${CONSOLE_PORT}, user bfadmin, password ${CONSOLE_PASSWORD}" >> /root/.bf1942_all_credentials.txt
+        chmod 600 /root/.bf1942_all_credentials.txt 2>/dev/null || true
+
+        log_success "Server manager settings updated"
+        log_warn "Remote console: port ${CONSOLE_PORT}, user bfadmin, password ${CONSOLE_PASSWORD}"
+    fi
+
+    # Seed the BFSMD map rotation - it ships empty and BFSMD refuses to
+    # start the game server without at least one level in it.
+    if [ ! -s "${SETTINGS_DIR}/servermaplist.con" ]; then
+        printf 'game.addLevel berlin GPM_CQ bf1942
+game.setCurrentLevel berlin GPM_CQ bf1942
+' > "${SETTINGS_DIR}/servermaplist.con"
+        log_success "Seeded default map rotation (berlin GPM_CQ)"
+    fi
+
+    # XML event logs (ev_*.xml) land here; the engine creates it on first
+    # start, but pre-creating it lets stats collectors watch it immediately.
+    mkdir -p "${BF_ROOT}/mods/bf1942/logs"
 
     # Don't modify useraccess.con - it already has the correct default hash
     # Just set credentials for display to user

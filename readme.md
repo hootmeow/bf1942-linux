@@ -53,13 +53,34 @@ Replace `ubu_24.0.3_bfsmd_setup.sh` with your distro's script name from the tabl
 sudo ./<your-setup-script>.sh
 ```
 
-The script is fully interactive. It will walk you through:
+The script is interactive by default. It will walk you through:
 
 1. **Installation mode** — choose Standalone (no remote management) or BFSMD (full GUI management via BFRM)
 2. **Instance name** *(BFSMD only)* — a unique name like `server1`, `conquest`, `tdm`
 3. **IP address** — auto-detected; choose local, public, or enter custom
 4. **BFSMD version** *(BFSMD only)* — v2.0 (recommended) or v2.01 (fixes admin/PunkBuster bugs)
 5. **Firewall rules** — optional, interactive security level selection
+
+The `bf1942_user` service account is created without a password (login locked) unless you opt in when asked — a password isn't needed to run the server, and admins can always get a shell with `sudo su - bf1942_user`.
+
+### Unattended Installs
+
+Every prompt can be answered from the command line — pass `--yes` and the installer never stops to ask:
+
+```bash
+sudo ./<your-setup-script>.sh server1 --yes                        # BFSMD, local IP, v2.0, firewall untouched
+sudo ./<your-setup-script>.sh server1 --yes --ip public --firewall tunnel
+sudo ./<your-setup-script>.sh --yes --mode standalone
+```
+
+| Flag | Values | Default with `--yes` |
+|------|--------|----------------------|
+| `--mode` | `standalone`, `bfsmd` | `bfsmd` when an instance name is given |
+| `--ip` | `local`, `public`, literal address | `local` |
+| `--version` | `2.0`, `2.01` | `2.0` |
+| `--firewall` | `skip`, `open`, `tunnel`, `restrict=ADDR` | `skip` |
+
+Run any installer with `--help` for the full reference. The flags also work without `--yes` to pre-answer individual prompts in an otherwise interactive run.
 
 ### 3️⃣ Add More Instances *(BFSMD Only)*
 

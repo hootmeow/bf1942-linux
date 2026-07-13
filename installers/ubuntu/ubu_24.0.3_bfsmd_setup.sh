@@ -9,9 +9,10 @@
 #    ✓ Multi-instance support
 #    ✓ Standalone or BFSMD modes
 #
-#  Usage: 
-#    Standalone: sudo ./ubu_24.0.3_bfsmd_setup.sh
-#    BFSMD:      sudo ./ubu_24.0.3_bfsmd_setup.sh [instance_name]
+#  Usage:
+#    Interactive: sudo ./ubu_24.0.3_bfsmd_setup.sh [instance_name]
+#    Unattended:  sudo ./ubu_24.0.3_bfsmd_setup.sh <instance_name> --yes [options]
+#    All options: sudo ./ubu_24.0.3_bfsmd_setup.sh --help
 #
 #  Author: OWLCAT (https://github.com/hootmeow / www.bf1942.online)
 # ---------------------------------------------------------------------------
@@ -58,19 +59,19 @@ select_ip_address() {
     local ips=$(detect_ip_addresses)
     local local_ip=$(echo "$ips" | cut -d'|' -f1)
     local public_ip=$(echo "$ips" | cut -d'|' -f2)
-    
+
     echo "" >&2
     echo "==================================================" >&2
     echo "   IP Address Configuration" >&2
     echo "==================================================" >&2
     echo "" >&2
-    
+
     if [ -z "$local_ip" ]; then
         log_error "Could not detect local IP address"
         read_custom_ip
         return
     fi
-    
+
     echo "Detected Network Configuration:" >&2
     echo -e "  Local IP:  ${CYAN}${local_ip}${NC}" >&2
     [ -n "$public_ip" ] && [ "$public_ip" != "$local_ip" ] && \
@@ -82,7 +83,7 @@ select_ip_address() {
     echo -e "     ${BLUE}Use if:${NC} Running on LAN or behind NAT/firewall" >&2
     echo -e "     ${BLUE}Example:${NC} Home network, cloud instance behind firewall" >&2
     echo "" >&2
-    
+
     if [ -n "$public_ip" ] && [ "$public_ip" != "$local_ip" ]; then
         echo -e "  ${BOLD}2) Public IP${NC} (${public_ip})" >&2
         echo -e "     ${BLUE}Use if:${NC} Server has direct public IP (no NAT)" >&2
@@ -92,7 +93,7 @@ select_ip_address() {
         echo -e "     ${BLUE}Use if:${NC} Neither option is correct or testing" >&2
         echo "" >&2
         read -r -p "Enter your choice [1-3]: " ip_choice
-        
+
         case "$ip_choice" in
             1) echo "$local_ip" ;;
             2) echo "$public_ip" ;;
@@ -107,7 +108,7 @@ select_ip_address() {
         echo -e "     ${BLUE}Use if:${NC} Detected IP is incorrect" >&2
         echo "" >&2
         read -r -p "Enter your choice [1-2]: " ip_choice
-        
+
         case "$ip_choice" in
             1) echo "$local_ip" ;;
             2) read_custom_ip ;;
@@ -134,7 +135,7 @@ read_custom_ip() {
 validate_ip() {
     local ip="$1"
     local regex='^([0-9]{1,3}\.){3}[0-9]{1,3}$'
-    
+
     if [[ $ip =~ $regex ]]; then
         IFS='.' read -ra octets <<< "$ip"
         for octet in "${octets[@]}"; do
@@ -149,17 +150,17 @@ validate_ip() {
 
 validate_instance_name() {
     local name="$1"
-    
+
     if [ ${#name} -lt 3 ] || [ ${#name} -gt 20 ]; then
         log_error "Instance name must be 3-20 characters long."
         return 1
     fi
-    
+
     if [[ ! "$name" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]]; then
         log_error "Instance name must start with a letter and contain only letters, numbers, dashes, and underscores."
         return 1
     fi
-    
+
     local reserved_names=("default" "root" "admin" "test" "localhost" "server")
     for reserved in "${reserved_names[@]}"; do
         if [ "${name,,}" = "$reserved" ]; then
@@ -167,66 +168,63 @@ validate_instance_name() {
             return 1
         fi
     done
-    
+
     if [ -d "${BF_HOME}/instances/${name}" ]; then
         log_error "Instance '$name' already exists."
         log_info "To reinstall it, remove it first: sudo ./bf1942_manager.sh remove $name"
         return 1
     fi
-    
+
     return 0
 }
 
 check_resources() {
     log_step "Checking system resources..."
-    
+
     local total_ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
     local total_ram_mb=$((total_ram_kb / 1024))
-    
+
     if [ "$total_ram_mb" -lt 1024 ]; then
         log_warn "Low RAM: ${total_ram_mb}MB (recommended: 1024MB)"
-        read -r -p "Continue anyway? [y/N] " confirm
-        if [[ ! "$confirm" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+        if ! confirm_continue; then
             log_info "Installation cancelled."
             exit 0
         fi
     else
         log_success "RAM: ${total_ram_mb}MB"
     fi
-    
+
     local available_space_kb=$(df /home | tail -1 | awk '{print $4}')
     local available_space_gb=$((available_space_kb / 1024 / 1024))
-    
+
     if [ "$available_space_gb" -lt 5 ]; then
         log_warn "Low disk space: ${available_space_gb}GB available (recommended: 5GB)"
-        read -r -p "Continue anyway? [y/N] " confirm
-        if [[ ! "$confirm" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+        if ! confirm_continue; then
             log_info "Installation cancelled."
             exit 0
         fi
     else
         log_success "Disk space: ${available_space_gb}GB available"
     fi
-    
+
     local cpu_cores=$(nproc)
     log_success "CPU cores: ${cpu_cores}"
-    
+
     local instance_count=0
     if [ -d "${BF_HOME}/instances" ]; then
         instance_count=$(find "${BF_HOME}/instances" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
     fi
-    
+
     local recommended_max=$((cpu_cores * 2))
     if [ "$instance_count" -ge "$recommended_max" ]; then
         log_warn "You have $instance_count instances. Recommended maximum: $recommended_max"
         echo "  Based on: ${cpu_cores} CPU cores × 2 = ${recommended_max} instances"
-        read -r -p "Continue anyway? [y/N] " confirm
-        if [[ ! "$confirm" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+        if ! confirm_continue; then
             log_info "Installation cancelled."
             exit 0
         fi
     fi
-    
+
     echo ""
     return 0
 }
@@ -234,7 +232,7 @@ check_resources() {
 check_port_available() {
     local port="$1"
     local protocol="${2:-tcp}"
-    
+
     if command -v ss >/dev/null 2>&1; then
         if [ "$protocol" = "tcp" ]; then
             ! ss -tlnp 2>/dev/null | grep -q ":${port} "
@@ -300,11 +298,11 @@ calculate_cpu_affinity() {
     local instance_num="$1"
     local total_cores=$(nproc)
     local cores_per_instance=2
-    
+
     if [ "$total_cores" -ge "$cores_per_instance" ]; then
         local start_core=$(( (instance_num * cores_per_instance) % total_cores ))
         local end_core=$(( (start_core + cores_per_instance - 1) % total_cores ))
-        
+
         if [ "$start_core" -le "$end_core" ]; then
             echo "${start_core}-${end_core}"
         else
@@ -321,9 +319,9 @@ save_credentials() {
     local password="$3"
     local mgmt_port="$4"
     local server_ip="$5"
-    
+
     local cred_file="/root/.bf1942_credentials_${instance}.txt"
-    
+
     cat > "$cred_file" << EOF
 ═══════════════════════════════════════════════════════════
   BF1942 Instance Credentials - ${instance}
@@ -347,7 +345,7 @@ Anyone can connect with these until you change them!
 To Change Password:
   1. Connect to BFRM with above credentials
   2. Go to Admin tab
-  3. Click "Change Password"  
+  3. Click "Change Password"
   4. Set a strong unique password
 
 Connection: ${server_ip}:${mgmt_port}
@@ -363,7 +361,7 @@ Generated: $(date)
 EOF
 
     chmod 600 "$cred_file"
-    
+
     local master_file="/root/.bf1942_all_credentials.txt"
     {
         echo ""
@@ -376,7 +374,7 @@ EOF
         echo "----------------------------------------"
     } >> "$master_file"
     chmod 600 "$master_file" 2>/dev/null || true
-    
+
     echo "$cred_file"
 }
 
@@ -386,8 +384,8 @@ display_credentials() {
     local server_ip="$3"
     local mgmt_port="$4"
     local cred_file="$5"
-    
-    clear
+
+    clear 2>/dev/null || true
     cat << "EOF"
 ╔════════════════════════════════════════════════════════════╗
 ║                                                            ║
@@ -395,7 +393,7 @@ display_credentials() {
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝
 EOF
-    
+
     echo ""
     echo -e "${BOLD}${RED}⚠  CHANGE PASSWORD IMMEDIATELY AFTER FIRST LOGIN  ⚠${NC}"
     echo ""
@@ -423,9 +421,140 @@ EOF
     echo -e "  ${CYAN}ssh -L ${mgmt_port}:localhost:${mgmt_port} user@${server_ip}${NC}"
     echo -e "  Then connect BFRM to: ${CYAN}localhost:${mgmt_port}${NC}"
     echo ""
-    echo "Press ENTER to continue..."
-    read -r
+    if [ "$ASSUME_YES" -eq 0 ]; then
+        echo "Press ENTER to continue..."
+        read -r
+    fi
 }
+
+# ------------------------------------------------------------
+# ARGUMENT PARSING
+# ------------------------------------------------------------
+
+show_help() {
+    cat <<EOF
+Usage: sudo $0 [instance_name] [options]
+
+Interactive by default; pass --yes for fully unattended installs.
+
+Options:
+  --mode <standalone|bfsmd>  Installation mode. Default: bfsmd when an
+                             instance name is given, otherwise asked.
+  --ip <local|public|ADDR>   IP to bind (BFSMD). Default with --yes: local.
+  --version <2.0|2.01>       BFSMD manager version. Default: 2.0.
+  --firewall <skip|open|tunnel|restrict=ADDR>
+                             skip    = leave the firewall alone (default with --yes)
+                             open    = game/query + management port open to all
+                             tunnel  = game/query only; management via SSH tunnel
+                             restrict=ADDR = game/query open, management from ADDR only
+  --yes, -y                  Never prompt: accept warnings/confirmations and
+                             use the defaults above for anything not given.
+  --help, -h                 Show this help.
+
+Unattended example:
+  sudo $0 server1 --yes --ip public --firewall tunnel
+EOF
+}
+
+# Ask to continue past a warning; --yes always continues.
+confirm_continue() {
+    if [ "$ASSUME_YES" -eq 1 ]; then
+        log_warn "--yes given - continuing anyway."
+        return 0
+    fi
+    local confirm
+    read -r -p "Continue anyway? [y/N] " confirm
+    [[ "$confirm" =~ ^([yY][eE][sS]|[yY])$ ]]
+}
+
+INSTANCE_NAME=""
+OPT_MODE=""
+OPT_IP=""
+OPT_VERSION=""
+OPT_FIREWALL=""
+ASSUME_YES=0
+ORIG_ARGS="$*"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --mode|--ip|--version|--firewall)
+            if [ $# -lt 2 ]; then
+                log_error "$1 requires a value (see --help)"
+                exit 1
+            fi
+            case "$1" in
+                --mode)     OPT_MODE="$2" ;;
+                --ip)       OPT_IP="$2" ;;
+                --version)  OPT_VERSION="$2" ;;
+                --firewall) OPT_FIREWALL="$2" ;;
+            esac
+            shift 2
+            ;;
+        --yes|-y)
+            ASSUME_YES=1
+            shift
+            ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        -*)
+            log_error "Unknown option: $1 (see --help)"
+            exit 1
+            ;;
+        *)
+            if [ -n "$INSTANCE_NAME" ]; then
+                log_error "Unexpected argument: $1 (instance name is already '${INSTANCE_NAME}')"
+                exit 1
+            fi
+            INSTANCE_NAME="$1"
+            shift
+            ;;
+    esac
+done
+
+case "$OPT_MODE" in
+    ""|standalone|bfsmd) ;;
+    *) log_error "Invalid --mode '${OPT_MODE}' (use standalone or bfsmd)"; exit 1 ;;
+esac
+case "$OPT_VERSION" in
+    ""|2.0|2.01) ;;
+    *) log_error "Invalid --version '${OPT_VERSION}' (use 2.0 or 2.01)"; exit 1 ;;
+esac
+case "$OPT_FIREWALL" in
+    ""|skip|open|tunnel) ;;
+    restrict=*)
+        if ! validate_ip "${OPT_FIREWALL#restrict=}"; then
+            log_error "Invalid IP in '--firewall ${OPT_FIREWALL}'"
+            exit 1
+        fi
+        ;;
+    *) log_error "Invalid --firewall '${OPT_FIREWALL}' (use skip, open, tunnel, or restrict=ADDR)"; exit 1 ;;
+esac
+if [ -n "$OPT_IP" ] && [ "$OPT_IP" != "local" ] && [ "$OPT_IP" != "public" ] && ! validate_ip "$OPT_IP"; then
+    log_error "Invalid --ip '${OPT_IP}' (use local, public, or a literal IPv4 address)"
+    exit 1
+fi
+
+# ------------------------------------------------------------
+# CLEANUP TRAP
+# ------------------------------------------------------------
+TEMP_DIR=""
+REGISTRY_ENTRY_ADDED=0
+INSTALL_COMPLETE=0
+
+cleanup() {
+    if [ -n "${TEMP_DIR:-}" ] && [ -d "$TEMP_DIR" ]; then
+        rm -rf "$TEMP_DIR"
+    fi
+    rm -f "${BF_HOME}/.bf1942_server_download.tar" 2>/dev/null || true
+    # Give the instance ID back if the install never got as far as creating
+    # the instance (cancelled prompt, failed download, port conflict, ...).
+    if [ "$REGISTRY_ENTRY_ADDED" -eq 1 ] && [ "$INSTALL_COMPLETE" -eq 0 ]; then
+        sed -i "/^${INSTANCE_NAME}=/d" "${INSTANCE_REGISTRY:-/etc/bf1942_instances.conf}" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
 
 # ------------------------------------------------------------
 # PRE-FLIGHT CHECKS
@@ -433,7 +562,7 @@ EOF
 
 if [[ $EUID -ne 0 ]]; then
    log_error "This script requires admin privileges. Please run with sudo:"
-   echo "        sudo $0 $*"
+   echo "        sudo $0 ${ORIG_ARGS}"
    exit 1
 fi
 
@@ -450,7 +579,7 @@ fi
 # ------------------------------------------------------------
 # BANNER
 # ------------------------------------------------------------
-clear
+clear 2>/dev/null || true
 cat << "EOF"
 ╔════════════════════════════════════════════════════════════╗
 ║                                                            ║
@@ -471,10 +600,23 @@ echo ""
 # ------------------------------------------------------------
 # INSTALLATION MODE
 # ------------------------------------------------------------
-INSTANCE_NAME="${1:-}"
-INSTALL_MODE=""
+if [ -n "$INSTANCE_NAME" ] && [ "$OPT_MODE" = "standalone" ]; then
+    log_error "Standalone mode does not take an instance name."
+    exit 1
+fi
 
-if [ -z "$INSTANCE_NAME" ]; then
+INSTALL_MODE="$OPT_MODE"
+
+if [ -z "$INSTALL_MODE" ] && [ -n "$INSTANCE_NAME" ]; then
+    INSTALL_MODE="bfsmd"
+fi
+
+if [ -z "$INSTALL_MODE" ] && [ "$ASSUME_YES" -eq 1 ]; then
+    log_error "--yes needs --mode standalone, or an instance name for a BFSMD install."
+    exit 1
+fi
+
+if [ -z "$INSTALL_MODE" ]; then
     echo "Select installation mode:"
     echo ""
     echo -e "  ${BOLD}1) Standalone Server${NC} (no remote management)"
@@ -488,32 +630,37 @@ if [ -z "$INSTANCE_NAME" ]; then
     echo "     • Advanced server management"
     echo ""
     read -r -p "Enter your choice [1 or 2]: " mode_choice
-    
+
     case "$mode_choice" in
-        1)
-            INSTALL_MODE="standalone"
-            INSTANCE_NAME="default"
-            ;;
-        2)
-            INSTALL_MODE="bfsmd"
-            while true; do
-                echo ""
-                read -r -p "Enter instance name (3-20 chars): " INSTANCE_NAME
-                if validate_instance_name "$INSTANCE_NAME"; then
-                    break
-                fi
-            done
-            ;;
+        1) INSTALL_MODE="standalone" ;;
+        2) INSTALL_MODE="bfsmd" ;;
         *)
             log_error "Invalid choice. Exiting."
             exit 1
             ;;
     esac
-else
-    INSTALL_MODE="bfsmd"
-    if ! validate_instance_name "$INSTANCE_NAME"; then
-        exit 1
+fi
+
+if [ "$INSTALL_MODE" = "bfsmd" ]; then
+    if [ -n "$INSTANCE_NAME" ]; then
+        if ! validate_instance_name "$INSTANCE_NAME"; then
+            exit 1
+        fi
+    else
+        if [ "$ASSUME_YES" -eq 1 ]; then
+            log_error "BFSMD mode needs an instance name (e.g. sudo $0 server1 --yes)."
+            exit 1
+        fi
+        while true; do
+            echo ""
+            read -r -p "Enter instance name (3-20 chars): " INSTANCE_NAME
+            if validate_instance_name "$INSTANCE_NAME"; then
+                break
+            fi
+        done
     fi
+else
+    INSTANCE_NAME="default"
 fi
 
 # ------------------------------------------------------------
@@ -523,12 +670,22 @@ if [ "$INSTALL_MODE" = "standalone" ]; then
     BF_ROOT="${BF_HOME}/bf1942"
     SERVICE_NAME="bf1942"
     SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+
+    # Standalone always uses the stock ports - make sure nothing else
+    # (including a stopped reinstall target) is holding them.
+    log_info "Checking port availability..."
+    if ! check_port_available 14567 udp || ! check_port_available 23000 udp; then
+        log_error "Port 14567/udp or 23000/udp is already in use."
+        log_error "Stop the process using it (a running standalone server?) and re-run."
+        exit 1
+    fi
+    log_success "Ports 14567/udp and 23000/udp available"
 else
     BF_BASE="${BF_HOME}/instances"
     BF_ROOT="${BF_BASE}/${INSTANCE_NAME}"
     SERVICE_NAME="bfsmd-${INSTANCE_NAME}"
     SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-    
+
     # Instance IDs are allocated once and persisted: the name hash can
     # collide for two different names, and a collision with a *stopped*
     # instance would pass the live-socket port check below unnoticed.
@@ -562,6 +719,7 @@ else
         done
         echo "${INSTANCE_NAME}=${INSTANCE_ID}" >> "$INSTANCE_REGISTRY"
         chmod 644 "$INSTANCE_REGISTRY" 2>/dev/null || true
+        REGISTRY_ENTRY_ADDED=1
     fi
 
     GAME_PORT=$((14567 + INSTANCE_ID))
@@ -575,13 +733,13 @@ else
         log_error "Port conflict detected. Free the ports or remove the conflicting instance."
         exit 1
     fi
-    
+
     log_info "Calculating CPU affinity..."
-    
+
     # Key the core assignment to the persistent instance ID - registry line
     # positions shift when an instance is removed, the ID never does.
     CPU_AFFINITY=$(calculate_cpu_affinity "$INSTANCE_ID")
-    
+
     log_success "CPU affinity: ${CPU_AFFINITY}"
 fi
 
@@ -591,22 +749,37 @@ SUDOERS_FILE="/etc/sudoers.d/bf1942_${INSTANCE_NAME}"
 # NETWORK CONFIGURATION
 # ------------------------------------------------------------
 if [ "$INSTALL_MODE" = "bfsmd" ]; then
-    log_info "Starting IP address selection..."
-    
-    SERVER_IP=$(select_ip_address)
-    
-    # Debug: verify IP was captured correctly
+    if [ -z "$OPT_IP" ] && [ "$ASSUME_YES" -eq 1 ]; then
+        OPT_IP="local"
+    fi
+
+    case "$OPT_IP" in
+        "")
+            log_info "Starting IP address selection..."
+            SERVER_IP=$(select_ip_address)
+            ;;
+        local)
+            SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
+            ;;
+        public)
+            SERVER_IP=$(detect_ip_addresses | cut -d'|' -f2)
+            ;;
+        *)
+            SERVER_IP="$OPT_IP"
+            ;;
+    esac
+
     if [ -z "$SERVER_IP" ]; then
         log_error "Failed to capture server IP"
         echo "Debug: SERVER_IP is empty" >&2
         exit 1
     fi
-    
+
     if ! validate_ip "$SERVER_IP"; then
         log_error "Invalid IP address captured: '${SERVER_IP}'"
         exit 1
     fi
-    
+
     log_success "Selected IP: ${SERVER_IP}"
 fi
 
@@ -615,12 +788,12 @@ fi
 # ------------------------------------------------------------
 if [ "$INSTALL_MODE" = "bfsmd" ]; then
     log_info "Preparing default admin credentials..."
-    
+
     # BFSMD uses a proprietary hash format that cannot be generated
     # Users must change password via BFRM after first login
     ADMIN_USERNAME="bf1942"
     ADMIN_PASSWORD="battlefield"
-    
+
     log_warn "Default credentials will be configured"
     log_warn "You MUST change the password via BFRM after installation"
 fi
@@ -653,30 +826,30 @@ fi
 
 echo "=================================================="
 echo ""
-read -r -p "Continue with this configuration? [y/N] " confirm
-if [[ ! "$confirm" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-    log_warn "Installation cancelled."
-    exit 0
+if [ "$ASSUME_YES" -eq 1 ]; then
+    log_info "--yes given - proceeding."
+else
+    read -r -p "Continue with this configuration? [y/N] " confirm
+    if [[ ! "$confirm" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+        log_warn "Installation cancelled."
+        exit 0
+    fi
 fi
 
 # ------------------------------------------------------------
-# SAFETY: Cleanup Trap
+# SAFETY: temp workspace (removed by the EXIT trap set at argument parsing)
 # ------------------------------------------------------------
 TEMP_DIR=$(mktemp -d)
 
-cleanup() {
-    if [ -d "$TEMP_DIR" ]; then
-        rm -rf "$TEMP_DIR"
-    fi
-    rm -f "${BF_HOME}/.bf1942_server_download.tar"
-}
-trap cleanup EXIT
-
 if [ -d "$BF_ROOT" ] && [ "$(ls -A "$BF_ROOT" 2>/dev/null)" ]; then
     log_warn "Target directory '$BF_ROOT' already exists and is not empty."
-    read -r -p "Overwrite? [y/N] " confirm
-    if [[ ! "$confirm" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-        exit 0
+    if [ "$ASSUME_YES" -eq 1 ]; then
+        log_warn "--yes given - overwriting."
+    else
+        read -r -p "Overwrite? [y/N] " confirm
+        if [[ ! "$confirm" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+            exit 0
+        fi
     fi
 fi
 
@@ -690,14 +863,23 @@ if id "$BF_USER" >/dev/null 2>&1; then
 else
     useradd -m -s /bin/bash "$BF_USER"
     log_success "User created."
-    
-    echo ""
-    log_warn "You must set a password for ${BF_USER} to allow manual login."
-    
-    if ! passwd "$BF_USER"; then
+
+    # A password is not needed to run the server, and a login-locked
+    # service account is the safer default - admins can still get a
+    # shell with: sudo su - bf1942_user
+    set_user_password="n"
+    if [ "$ASSUME_YES" -eq 0 ]; then
         echo ""
-        log_error "Password setup failed. Script aborted."
-        exit 1
+        read -r -p "Set a login password for ${BF_USER}? (not required) [y/N] " set_user_password
+    fi
+    if [[ "$set_user_password" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+        if ! passwd "$BF_USER"; then
+            echo ""
+            log_error "Password setup failed. Script aborted."
+            exit 1
+        fi
+    else
+        log_info "Password login for ${BF_USER} stays disabled (use: sudo su - ${BF_USER})."
     fi
 fi
 
@@ -710,10 +892,10 @@ log_step "2/8: Installing system dependencies"
 
 if [ ! -f "/etc/bf1942_deps_installed" ]; then
     log_info "First-time setup: Installing i386 architecture and libraries..."
-    
+
     dpkg --add-architecture i386
     apt-get update -y
-    
+
     log_info "Installing modern 32-bit libraries..."
     apt-get install -y --no-install-recommends \
         libc6:i386 libstdc++6:i386 libgcc-s1:i386 \
@@ -721,9 +903,9 @@ if [ ! -f "/etc/bf1942_deps_installed" ]; then
         libx11-6:i386 libncurses6:i386 wget tar curl net-tools ufw
 
     log_info "Installing legacy libraries..."
-    
+
     pushd "$TEMP_DIR" > /dev/null
-    
+
     # These exact builds rotate off the main mirror when Debian archives an
     # old release, so fall back to archive.debian.org before giving up.
     fetch_legacy_deb() {
@@ -739,12 +921,12 @@ if [ ! -f "/etc/bf1942_deps_installed" ]; then
     fetch_legacy_deb "pool/main/n/ncurses/libtinfo5_6.2+20201114-2+deb11u2_i386.deb"
     fetch_legacy_deb "pool/main/n/ncurses/libncurses5_6.2+20201114-2+deb11u2_i386.deb"
     fetch_legacy_deb "pool/main/g/gcc-3.3/libstdc++5_3.3.6-34_i386.deb"
-    
+
     dpkg -i libtinfo5*.deb libncurses5*.deb libstdc++5*.deb || true
     ldconfig
-    
+
     popd > /dev/null
-    
+
     # The package steps above tolerate individual failures, so verify the
     # legacy libraries actually landed before recording success - otherwise
     # a broken install would be skipped forever on re-runs.
@@ -765,7 +947,15 @@ fi
 # ------------------------------------------------------------
 log_step "3/8: Selecting server version"
 
-if [ "$INSTALL_MODE" = "bfsmd" ]; then
+if [ "$INSTALL_MODE" = "bfsmd" ] && { [ -n "$OPT_VERSION" ] || [ "$ASSUME_YES" -eq 1 ]; }; then
+    if [ "${OPT_VERSION:-2.0}" = "2.01" ]; then
+        SERVER_TAR_URL="https://files.bf1942.online/server/linux/linux-bf1942-server-bfsm-hitreg-201patched.tar"
+        log_info "Selected: v2.01 (Patched)"
+    else
+        SERVER_TAR_URL="https://files.bf1942.online/server/linux/linux-bf1942-server-bfsm-hitreg.tar"
+        log_info "Selected: v2.0 (Final)"
+    fi
+elif [ "$INSTALL_MODE" = "bfsmd" ]; then
     echo ""
     echo "--------------------------------------------------"
     echo " SELECT SERVER MANAGER VERSION"
@@ -780,7 +970,7 @@ if [ "$INSTALL_MODE" = "bfsmd" ]; then
     echo "    - May truncate special characters"
     echo "--------------------------------------------------"
     read -r -p "Enter your choice [1 or 2]: " version_choice
-    
+
     case "$version_choice" in
         1)
             SERVER_TAR_URL="https://files.bf1942.online/server/linux/linux-bf1942-server-bfsm-hitreg.tar"
@@ -849,7 +1039,7 @@ if [ "$INSTALL_MODE" = "bfsmd" ]; then
     chmod +x bfsmd bfsmd.static 2>/dev/null || true
 fi
 
-if [ -f "fixinstall.sh" ]; then 
+if [ -f "fixinstall.sh" ]; then
     log_info "Executing fixinstall.sh..."
     ./fixinstall.sh
     log_success "fixinstall.sh executed."
@@ -932,17 +1122,26 @@ game.setCurrentLevel berlin GPM_CQ bf1942
     # XML event logs (ev_*.xml) land here; the engine creates it on first
     # start, but pre-creating it lets stats collectors watch it immediately.
     mkdir -p "${BF_ROOT}/mods/bf1942/logs"
-    
+
     # Don't modify useraccess.con - it already has the correct default hash
     # Just set credentials for display to user
     ADMIN_USERNAME="bf1942"
     ADMIN_PASSWORD="battlefield"
-    
+
     log_info "Default admin credentials: bf1942/battlefield"
     log_warn "CRITICAL: Change password via BFRM immediately after first login!"
 fi
 
-chown -R "${BF_USER}:${BF_USER}" "${BF_HOME}"
+# Scope ownership to this install - a recursive chown of the whole home
+# directory would touch other instances while they are running.
+chown -R "${BF_USER}:${BF_USER}" "${BF_ROOT}"
+if [ "$INSTALL_MODE" = "bfsmd" ]; then
+    chown "${BF_USER}:${BF_USER}" "${BF_BASE}"
+fi
+
+# The instance now exists on disk, so its registry entry must survive even
+# if a later optional step (firewall prompt, ...) is interrupted.
+INSTALL_COMPLETE=1
 
 # ------------------------------------------------------------
 # STEP 6: Systemd Service
@@ -951,7 +1150,7 @@ log_step "6/8: Creating systemd service"
 
 if [ "$INSTALL_MODE" = "standalone" ]; then
     log_info "Creating standalone server service..."
-    
+
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Battlefield 1942 Dedicated Server
@@ -973,7 +1172,7 @@ EOF
 
 else
     log_info "Creating BFSMD service for '${INSTANCE_NAME}'..."
-    
+
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Battlefield 1942 Server Manager Daemon (${INSTANCE_NAME})
@@ -1045,61 +1244,82 @@ fi
 # ------------------------------------------------------------
 echo ""
 log_info "Firewall Configuration"
-read -r -p "Configure UFW firewall rules? [y/N] " response
 
-if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-    if command -v ufw >/dev/null; then
-        log_info "Configuring firewall..."
-        
-        if [ "$INSTALL_MODE" = "standalone" ]; then
-            ufw allow 14567/udp comment 'BF1942 Game'
-            ufw allow 23000/udp comment 'BF1942 Query'
+FIREWALL_MODE="$OPT_FIREWALL"
+if [ -z "$FIREWALL_MODE" ]; then
+    if [ "$ASSUME_YES" -eq 1 ]; then
+        FIREWALL_MODE="skip"
+    else
+        read -r -p "Configure UFW firewall rules? [y/N] " response
+        if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+            FIREWALL_MODE="ask"
         else
-            ufw allow ${GAME_PORT}/udp comment "BF1942 ${INSTANCE_NAME} Game"
-            ufw allow ${QUERY_PORT}/udp comment "BF1942 ${INSTANCE_NAME} Query"
-            
-            # Management port configuration
+            FIREWALL_MODE="skip"
+        fi
+    fi
+fi
+
+if [ "$FIREWALL_MODE" = "skip" ]; then
+    log_info "Skipping firewall configuration"
+elif ! command -v ufw >/dev/null; then
+    log_warn "UFW not found - skipping firewall configuration"
+else
+    log_info "Configuring firewall..."
+
+    if [ "$INSTALL_MODE" = "standalone" ]; then
+        ufw allow 14567/udp comment 'BF1942 Game'
+        ufw allow 23000/udp comment 'BF1942 Query'
+    else
+        ufw allow ${GAME_PORT}/udp comment "BF1942 ${INSTANCE_NAME} Game"
+        ufw allow ${QUERY_PORT}/udp comment "BF1942 ${INSTANCE_NAME} Query"
+
+        if [ "$FIREWALL_MODE" = "ask" ]; then
             echo ""
             echo "Management Port Security:"
             echo "  1) Open to all IPs (easier, less secure)"
             echo "  2) Restrict to specific IP (more secure)"
             echo "  3) Skip (use SSH tunnel instead - most secure)"
             read -r -p "Choice [1-3, default: 1]: " mgmt_choice
-            
+
             case "$mgmt_choice" in
                 2)
                     read -r -p "Enter trusted IP address: " trusted_ip
                     if validate_ip "$trusted_ip"; then
-                        ufw allow from ${trusted_ip} to any port ${MGMT_PORT} proto tcp comment "BFSMD ${INSTANCE_NAME} Mgmt"
-                        log_success "Management port restricted to ${trusted_ip}"
+                        FIREWALL_MODE="restrict=${trusted_ip}"
                     else
                         log_warn "Invalid IP, opening to all"
-                        ufw allow ${MGMT_PORT}/tcp comment "BFSMD ${INSTANCE_NAME} Mgmt"
+                        FIREWALL_MODE="open"
                     fi
                     ;;
-                3)
-                    log_info "Management port NOT opened (use SSH tunnel)"
-                    ;;
-                *)
-                    ufw allow ${MGMT_PORT}/tcp comment "BFSMD ${INSTANCE_NAME} Mgmt"
-                    log_warn "Management port open to all IPs - consider using SSH tunnel"
-                    ;;
+                3) FIREWALL_MODE="tunnel" ;;
+                *) FIREWALL_MODE="open" ;;
             esac
         fi
-        
-        # Keep SSH reachable: ufw blocks all incoming traffic by default,
-        # so enabling it without an SSH rule would drop a remote session.
-        SSH_PORT=$(sshd -T 2>/dev/null | awk '$1=="port"{print $2; exit}' || true)
-        ufw allow "${SSH_PORT:-22}/tcp" comment 'SSH'
 
-        ufw --force enable
-        ufw reload
-        log_success "Firewall configured"
-    else
-        log_warn "UFW not installed"
+        case "$FIREWALL_MODE" in
+            restrict=*)
+                trusted_ip="${FIREWALL_MODE#restrict=}"
+                ufw allow from ${trusted_ip} to any port ${MGMT_PORT} proto tcp comment "BFSMD ${INSTANCE_NAME} Mgmt"
+                log_success "Management port restricted to ${trusted_ip}"
+                ;;
+            tunnel)
+                log_info "Management port NOT opened (use SSH tunnel)"
+                ;;
+            *)
+                ufw allow ${MGMT_PORT}/tcp comment "BFSMD ${INSTANCE_NAME} Mgmt"
+                log_warn "Management port open to all IPs - consider using SSH tunnel"
+                ;;
+        esac
     fi
-else
-    log_info "Skipping firewall configuration"
+
+    # Keep SSH reachable: ufw blocks all incoming traffic by default,
+    # so enabling it without an SSH rule would drop a remote session.
+    SSH_PORT=$(sshd -T 2>/dev/null | awk '$1=="port"{print $2; exit}' || true)
+    ufw allow "${SSH_PORT:-22}/tcp" comment 'SSH'
+
+    ufw --force enable
+    ufw reload
+    log_success "Firewall configured"
 fi
 
 # ------------------------------------------------------------
@@ -1113,7 +1333,7 @@ fi
 # ------------------------------------------------------------
 # FINAL SUMMARY
 # ------------------------------------------------------------
-clear
+clear 2>/dev/null || true
 cat << "EOF"
 ╔════════════════════════════════════════════════════════════╗
 ║                                                            ║

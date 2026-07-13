@@ -654,11 +654,17 @@ if [ -z "$INSTALL_MODE" ]; then
     echo "     • Supports multiple instances"
     echo "     • Advanced server management"
     echo ""
-    read -r -p "Enter your choice [1 or 2]: " mode_choice
+    echo -e "  ${BOLD}3) Exit${NC} (install nothing)"
+    echo ""
+    read -r -p "Enter your choice [1-3]: " mode_choice
 
     case "$mode_choice" in
         1) INSTALL_MODE="standalone" ;;
         2) INSTALL_MODE="bfsmd" ;;
+        3|q|Q)
+            log_info "Installation cancelled - nothing was changed."
+            exit 0
+            ;;
         *)
             log_error "Invalid choice. Exiting."
             exit 1
@@ -678,7 +684,11 @@ if [ "$INSTALL_MODE" = "bfsmd" ]; then
         fi
         while true; do
             echo ""
-            read -r -p "Enter instance name (3-20 chars): " INSTANCE_NAME
+            read -r -p "Enter instance name (3-20 chars, or q to quit): " INSTANCE_NAME
+            if [ "$INSTANCE_NAME" = "q" ] || [ "$INSTANCE_NAME" = "Q" ]; then
+                log_info "Installation cancelled - nothing was changed."
+                exit 0
+            fi
             if validate_instance_name "$INSTANCE_NAME"; then
                 break
             fi

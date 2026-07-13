@@ -627,6 +627,7 @@ echo -e "${C_ARMY}   ━━━━━━━━━━━━━━━━━━━�
 echo -e "   ${YELLOW}★${NC} ${BOLD}BATTLEFIELD 1942 · DEDICATED SERVER${NC} ${YELLOW}★${NC}  ${C_STEEL}[Fedora]${NC}"
 echo -e "   ${DIM}enhanced multi-instance setup — smart · secure · optimized${NC}"
 echo -e "${C_ARMY}   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "   ${DIM}by${NC} ${BOLD}OWLCAT${NC}  ${DIM}·${NC}  ${CYAN}github.com/hootmeow/bf1942-linux${NC}  ${DIM}·${NC}  ${C_KHAKI}www.bf1942.online${NC}"
 echo ""
 
 # ------------------------------------------------------------

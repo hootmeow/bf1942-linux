@@ -251,6 +251,9 @@ validate_ports() {
     local game_port="$1"
     local query_port="$2"
     local mgmt_port="$3"
+    local lan_port="$4"
+    local ase_port="$5"
+    local console_port="$6"
 
     log_info "Checking port availability..."
 
@@ -266,6 +269,21 @@ validate_ports() {
 
     if ! check_port_available "$mgmt_port" "tcp"; then
         log_error "Management port $mgmt_port (TCP) is already in use"
+        return 1
+    fi
+
+    if ! check_port_available "$lan_port" "udp"; then
+        log_error "GameSpy LAN port $lan_port (UDP) is already in use"
+        return 1
+    fi
+
+    if ! check_port_available "$ase_port" "udp"; then
+        log_error "ASE port $ase_port (UDP) is already in use"
+        return 1
+    fi
+
+    if ! check_port_available "$console_port" "tcp"; then
+        log_error "Remote console port $console_port (TCP) is already in use"
         return 1
     fi
 
@@ -517,8 +535,41 @@ else
     SERVICE_NAME="bfsmd-${INSTANCE_NAME}"
     SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
-    INSTANCE_HASH=$(echo -n "$INSTANCE_NAME" | cksum | cut -d' ' -f1)
-    INSTANCE_ID=$((INSTANCE_HASH % 100))
+    # Instance IDs are allocated once and persisted: the name hash can
+    # collide for two different names, and a collision with a *stopped*
+    # instance would pass the live-socket port check below unnoticed.
+    INSTANCE_REGISTRY="/etc/bf1942_instances.conf"
+
+    # Seed the registry with instances created before it existed.
+    if [ -d "${BF_HOME}/instances" ]; then
+        for existing_dir in "${BF_HOME}/instances"/*/; do
+            [ -d "$existing_dir" ] || continue
+            existing_name=$(basename "$existing_dir")
+            grep -q "^${existing_name}=" "$INSTANCE_REGISTRY" 2>/dev/null && continue
+            existing_hash=$(echo -n "$existing_name" | cksum | cut -d' ' -f1)
+            echo "${existing_name}=$((existing_hash % 100))" >> "$INSTANCE_REGISTRY"
+        done
+    fi
+
+    INSTANCE_ID=$(awk -F= -v n="$INSTANCE_NAME" '$1==n{print $2; exit}' "$INSTANCE_REGISTRY" 2>/dev/null || true)
+    if [ -z "$INSTANCE_ID" ]; then
+        INSTANCE_HASH=$(echo -n "$INSTANCE_NAME" | cksum | cut -d' ' -f1)
+        INSTANCE_ID=$((INSTANCE_HASH % 100))
+        ID_TRIES=0
+        # ID 0 is never assigned: it would reproduce the standalone
+        # server's default ports (14567/23000).
+        while [ "$INSTANCE_ID" -eq 0 ] || grep -q "=${INSTANCE_ID}\$" "$INSTANCE_REGISTRY" 2>/dev/null; do
+            INSTANCE_ID=$(( (INSTANCE_ID + 1) % 100 ))
+            ID_TRIES=$((ID_TRIES + 1))
+            if [ "$ID_TRIES" -gt 100 ]; then
+                log_error "No free instance IDs left (see ${INSTANCE_REGISTRY})."
+                exit 1
+            fi
+        done
+        echo "${INSTANCE_NAME}=${INSTANCE_ID}" >> "$INSTANCE_REGISTRY"
+        chmod 644 "$INSTANCE_REGISTRY" 2>/dev/null || true
+    fi
+
     GAME_PORT=$((14567 + INSTANCE_ID))
     QUERY_PORT=$((23000 + INSTANCE_ID))
     MGMT_PORT=$((14667 + INSTANCE_ID))
@@ -526,18 +577,17 @@ else
     ASE_PORT=$((14690 + INSTANCE_ID))
     CONSOLE_PORT=$((4711 + INSTANCE_ID))
 
-    if ! validate_ports "$GAME_PORT" "$QUERY_PORT" "$MGMT_PORT"; then
-        log_error "Port conflict detected. Try a different instance name."
+    if ! validate_ports "$GAME_PORT" "$QUERY_PORT" "$MGMT_PORT" "$LAN_PORT" "$ASE_PORT" "$CONSOLE_PORT"; then
+        log_error "Port conflict detected. Free the ports or remove the conflicting instance."
         exit 1
     fi
 
     log_info "Calculating CPU affinity..."
 
-    INSTANCE_NUM=0
-    if [ -d "${BF_HOME}/instances" ]; then
-        INSTANCE_NUM=$(find "${BF_HOME}/instances" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
-    fi
-    CPU_AFFINITY=$(calculate_cpu_affinity "$INSTANCE_NUM")
+    # Use the instance's registry position so its core assignment is
+    # deterministic and survives other instances being removed.
+    INSTANCE_NUM=$(awk -F= -v n="$INSTANCE_NAME" '$1==n{print NR-1; exit}' "$INSTANCE_REGISTRY" 2>/dev/null || true)
+    CPU_AFFINITY=$(calculate_cpu_affinity "${INSTANCE_NUM:-0}")
 
     log_success "CPU affinity: ${CPU_AFFINITY}"
 fi
@@ -623,6 +673,7 @@ cleanup() {
     if [ -d "$TEMP_DIR" ]; then
         rm -rf "$TEMP_DIR"
     fi
+    rm -f "${BF_HOME}/.bf1942_server_download.tar"
 }
 trap cleanup EXIT
 
@@ -703,8 +754,17 @@ if [ ! -f "/etc/bf1942_deps_installed" ]; then
         restorecon -Rv "${BF_HOME}" 2>/dev/null || true
     fi
 
-    touch /etc/bf1942_deps_installed
-    log_success "Dependencies installed."
+    # The package steps above tolerate individual failures, so verify the
+    # legacy libraries actually landed before recording success - otherwise
+    # a broken install would be skipped forever on re-runs.
+    if ldconfig -p | grep -q 'libstdc++\.so\.5' && ldconfig -p | grep -q 'libncurses\.so\.5'; then
+        touch /etc/bf1942_deps_installed
+        log_success "Dependencies installed."
+    else
+        log_error "Legacy 32-bit libraries missing (libstdc++.so.5 / libncurses.so.5)."
+        log_error "Fix the failed package installs above and re-run the script."
+        exit 1
+    fi
 else
     log_info "Dependencies already installed. Skipping."
 fi
@@ -756,10 +816,24 @@ log_step "4/8: Downloading and installing server files"
 
 log_info "Downloading from: ${SERVER_TAR_URL}"
 
-if ! wget -qO- "$SERVER_TAR_URL" | tar -x --strip-components=1 -C "$BF_ROOT"; then
-    log_error "Download or extraction failed."
+# Download to a file first (under /home, not tmpfs - the archive is large)
+# so a dropped connection can't leave a half-extracted install behind.
+SERVER_TAR="${BF_HOME}/.bf1942_server_download.tar"
+rm -f "$SERVER_TAR"
+
+if ! wget -q --show-progress -O "$SERVER_TAR" "$SERVER_TAR_URL"; then
+    rm -f "$SERVER_TAR"
+    log_error "Download failed."
     exit 1
 fi
+
+log_info "Extracting..."
+if ! tar -x --strip-components=1 -C "$BF_ROOT" -f "$SERVER_TAR"; then
+    rm -f "$SERVER_TAR"
+    log_error "Extraction failed."
+    exit 1
+fi
+rm -f "$SERVER_TAR"
 
 log_success "Files extracted to ${BF_ROOT}"
 
@@ -790,6 +864,21 @@ if [ -f "fixinstall.sh" ]; then
     log_success "fixinstall.sh executed."
 fi
 
+if [ "$INSTALL_MODE" = "standalone" ]; then
+    SETTINGS_DIR="${BF_ROOT}/mods/bf1942/settings"
+    # fixinstall.sh lower-cases every filename, so it's serversettings.con.
+    if [ -f "${SETTINGS_DIR}/serversettings.con" ]; then
+        log_info "Enabling XML event logging..."
+        cp "${SETTINGS_DIR}/serversettings.con" "${SETTINGS_DIR}/serversettings.con.bak"
+        sed -i "s/game\.serverEventLogging [0-9]*/game.serverEventLogging 1/" "${SETTINGS_DIR}/serversettings.con"
+        sed -i "s/game\.serverEventLogCompression [0-9]*/game.serverEventLogCompression 0/" "${SETTINGS_DIR}/serversettings.con"
+        log_success "Event logging enabled"
+    fi
+    # XML event logs (ev_*.xml) land here; pre-creating it lets stats
+    # collectors watch the path immediately.
+    mkdir -p "${BF_ROOT}/mods/bf1942/logs"
+fi
+
 if [ "$INSTALL_MODE" = "bfsmd" ]; then
     SETTINGS_DIR="${BF_ROOT}/mods/bf1942/settings"
     # fixinstall.sh lower-cases every filename, so the settings files are
@@ -818,7 +907,9 @@ if [ "$INSTALL_MODE" = "bfsmd" ]; then
 
         cp "$SM_CON" "${SM_CON}.bak"
 
-        CONSOLE_PASSWORD=$(dd if=/dev/urandom bs=64 count=1 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 12)
+        # 256 random bytes so that at least 12 alphanumerics always survive
+        # the tr filter (64 bytes fell short roughly one run in eight).
+        CONSOLE_PASSWORD=$(dd if=/dev/urandom bs=256 count=1 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 12)
 
         sed -i "s/game\.serverPort [0-9]*/game.serverPort ${GAME_PORT}/" "$SM_CON"
         sed -i "s/game\.gameSpyPort [0-9]*/game.gameSpyPort ${QUERY_PORT}/" "$SM_CON"
@@ -978,6 +1069,9 @@ if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
             systemctl enable --now firewalld
         fi
         log_info "Configuring firewall..."
+
+        # Keep SSH reachable in case it is missing from the active zone.
+        firewall-cmd --permanent --add-service=ssh >/dev/null 2>&1 || true
 
         if [ "$INSTALL_MODE" = "standalone" ]; then
             firewall-cmd --permanent --add-port=14567/udp

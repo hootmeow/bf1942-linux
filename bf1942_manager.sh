@@ -39,21 +39,49 @@ require_root() {
     fi
 }
 
-# Get instance hash/ID from name
+# Written by the installer: one "name=id" line per instance
+INSTANCE_REGISTRY="/etc/bf1942_instances.conf"
+
+# First hash field of the stock useraccess.con shipped in the server tar.
+# Its presence means the default bf1942/battlefield account is still active
+# (the file stores hashes, so the plaintext password never appears in it).
+DEFAULT_ACCESS_HASH="0C9CB6FC1E3B366C190BA57A52498A5162913A0D4C29B31A0A7A5B432F9884F0"
+
+# Get instance ID: prefer the persistent registry, fall back to the legacy
+# name hash for instances created before the registry existed.
 get_instance_id() {
     local name="$1"
-    local hash=$(echo -n "$name" | cksum | cut -d' ' -f1)
-    echo $((hash % 100))
+    local id=""
+    if [ -f "$INSTANCE_REGISTRY" ]; then
+        id=$(awk -F= -v n="$name" '$1==n{print $2; exit}' "$INSTANCE_REGISTRY")
+    fi
+    if [ -z "$id" ]; then
+        local hash=$(echo -n "$name" | cksum | cut -d' ' -f1)
+        id=$((hash % 100))
+    fi
+    echo "$id"
 }
 
-# Calculate ports from instance name
+# Read ports from the instance's actual configuration (servermanager.con and
+# the systemd unit); fall back to ID-derived defaults for anything missing,
+# so manual port edits are reported truthfully.
 get_ports() {
     local name="$1"
-    local id=$(get_instance_id "$name")
-    local game_port=$((14567 + id))
-    local query_port=$((23000 + id))
-    local mgmt_port=$((14667 + id))
-    echo "${game_port} ${query_port} ${mgmt_port}"
+    local con="${BF_BASE}/${name}/mods/bf1942/settings/servermanager.con"
+    local unit="/etc/systemd/system/bfsmd-${name}.service"
+    local game="" query="" mgmt=""
+
+    if [ -f "$con" ]; then
+        game=$(awk '$1=="game.serverPort"{print $2; exit}' "$con" | tr -d '\r')
+        query=$(awk '$1=="game.gameSpyPort"{print $2; exit}' "$con" | tr -d '\r')
+    fi
+    if [ -f "$unit" ]; then
+        mgmt=$(sed -n 's/.*-port \([0-9]\{1,\}\).*/\1/p' "$unit" | head -1)
+    fi
+
+    local id
+    id=$(get_instance_id "$name")
+    echo "${game:-$((14567 + id))} ${query:-$((23000 + id))} ${mgmt:-$((14667 + id))}"
 }
 
 # Check if service file exists
@@ -394,8 +422,8 @@ security_audit() {
                 local access_file="${instance_dir}/mods/bf1942/settings/useraccess.con"
                 
                 if [ -f "$access_file" ]; then
-                    if grep -q "battlefield" "$access_file" 2>/dev/null; then
-                        echo -e "  ${RED}✗${NC} $name - Default password 'battlefield' still in use!"
+                    if grep -qi "$DEFAULT_ACCESS_HASH" "$access_file" 2>/dev/null; then
+                        echo -e "  ${RED}✗${NC} $name - Default credentials (bf1942/battlefield) still in use!"
                         issues=$((issues + 1))
                     else
                         echo -e "  ${GREEN}✓${NC} $name - Default password changed"
@@ -416,7 +444,10 @@ security_audit() {
             echo -e "  ${GREEN}✓${NC} UFW firewall is active"
             
             # Check if ports are properly restricted
-            local mgmt_ports_open=$(ufw status | grep -c "14[67][0-9][0-9].*ALLOW.*Anywhere" || echo "0")
+            # grep -c prints the count even when it is 0 (with exit status 1),
+            # so no "|| echo 0" fallback - that would append a second line
+            # and break the numeric test below.
+            local mgmt_ports_open=$(ufw status | grep -c "14[67][0-9][0-9].*ALLOW.*Anywhere" || true)
             if [ "$mgmt_ports_open" -gt 0 ]; then
                 echo -e "  ${YELLOW}⚠${NC} Management ports may be open to the world"
                 echo "    Consider restricting to trusted IPs only"
@@ -580,6 +611,14 @@ remove_instance() {
     
     log_info "Removing sudoers file..."
     rm -f "/etc/sudoers.d/bf1942_${name}"
+
+    log_info "Removing saved credentials..."
+    rm -f "/root/.bf1942_credentials_${name}.txt"
+
+    if [ -f "$INSTANCE_REGISTRY" ]; then
+        log_info "Releasing instance ID..."
+        sed -i "/^${name}=/d" "$INSTANCE_REGISTRY"
+    fi
     
     log_info "Removing instance files..."
     rm -rf "$instance_path"
@@ -612,10 +651,15 @@ backup_instance() {
     
     mkdir -p "$backup_dir"
     
+    if systemctl is-active --quiet "bfsmd-${name}.service" 2>/dev/null; then
+        log_warn "Instance '$name' is running - files can change mid-backup."
+        log_warn "For a guaranteed-consistent backup: sudo $0 stop ${name}"
+    fi
+
     log_info "Creating backup of instance '$name'..."
     log_info "This may take a minute..."
-    
-    if tar -czf "${backup_dir}/${backup_file}" -C "${BF_BASE}" "${name}" 2>/dev/null; then
+
+    if tar -czf "${backup_dir}/${backup_file}" -C "${BF_BASE}" "${name}"; then
         local size=$(du -h "${backup_dir}/${backup_file}" | cut -f1)
         log_success "Backup created: ${backup_dir}/${backup_file} (${size})"
         echo ""

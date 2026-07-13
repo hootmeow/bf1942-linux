@@ -200,7 +200,8 @@ patch_instance() {
     if [ $all_ok -eq 1 ]; then
         log_success "Done: ${name}"
     else
-        log_warn "Completed with warnings: ${name}"
+        log_warn "Completed with errors: ${name}"
+        return 1
     fi
 }
 

@@ -162,13 +162,16 @@ journalctl -u bfsmd-server1.service -f
 
 ### Automatic Port Allocation
 
-Each instance gets unique ports calculated from its name:
+Each instance gets a unique ID (1–99), derived from its name. IDs are recorded in `/etc/bf1942_instances.conf`; if a new name would produce an ID that is already taken, the next free ID is used automatically, so two instances can never be assigned the same ports (ID 0 is reserved — it belongs to the standalone server's default ports).
 
 | Port | Formula | Example (`server1`) |
 |------|---------|---------------------|
-| Game (UDP) | 14567 + hash | 14600 |
-| Query (UDP) | 23000 + hash | 23033 |
-| Management (TCP) | 14667 + hash | 14700 |
+| Game (UDP) | 14567 + ID | 14600 |
+| Query (UDP) | 23000 + ID | 23033 |
+| Management (TCP) | 14667 + ID | 14700 |
+| GameSpy LAN (UDP) | 22000 + ID | 22033 |
+| ASE (UDP) | 14690 + ID | 14723 |
+| Remote console (TCP) | 4711 + ID | 4744 |
 
 ```bash
 ./bf1942_manager.sh ports   # See all current assignments

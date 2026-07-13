@@ -40,11 +40,13 @@ import sys
 import binascii
 
 def patch_file(filename, offset, original_hex, new_hex):
+    """Returns True on success/already-patched, False on failure,
+    None when the file is absent (skipped)."""
     print(f"--- Processing {filename} ---")
-    
+
     if not os.path.exists(filename):
-        print(f"[ERROR] File not found: {filename}")
-        return
+        print(f"[SKIP] File not found: {filename}")
+        return None
 
     # Convert hex strings to bytes
     try:
@@ -52,7 +54,7 @@ def patch_file(filename, offset, original_hex, new_hex):
         new_bytes = binascii.unhexlify(new_hex.replace(" ", ""))
     except binascii.Error as e:
         print(f"[ERROR] Invalid hex data in script: {e}")
-        return
+        return False
 
     # Length check
     if len(orig_bytes) != len(new_bytes):
@@ -70,24 +72,27 @@ def patch_file(filename, offset, original_hex, new_hex):
             # 3. Compare
             if current_data == orig_bytes:
                 print(f"[OK] Original bytes match at offset 0x{offset:X}.")
-                
+
                 # 4. Write new bytes
                 f.seek(offset)
                 f.write(new_bytes)
-                print(f"[SUCCESS] Patched {filename}.")
-            
+                print(f"[SUCCESS] Patched {filename}.\n")
+                return True
+
             elif current_data == new_bytes:
-                print(f"[INFO] File appears to be ALREADY PATCHED. No changes made.")
-                
+                print(f"[INFO] File appears to be ALREADY PATCHED. No changes made.\n")
+                return True
+
             else:
                 print(f"[FAIL] Byte mismatch at offset 0x{offset:X}!")
                 print(f"       Expected: {binascii.hexlify(orig_bytes).decode('utf-8')}")
                 print(f"       Found:    {binascii.hexlify(current_data).decode('utf-8')}")
-                print("       Aborting patch for this file to prevent corruption.")
+                print("       Aborting patch for this file to prevent corruption.\n")
+                return False
 
     except IOError as e:
-        print(f"[ERROR] Could not open/write file: {e}")
-    print("\n")
+        print(f"[ERROR] Could not open/write file: {e}\n")
+        return False
 
 # ==============================================================================
 # DATA DEFINITIONS - CTF Flag Respawn Fix
@@ -118,5 +123,12 @@ if __name__ == "__main__":
         os.chdir(server_dir)
         print(f"Working in: {os.getcwd()}\n")
 
-    patch_file(static_file, static_offset, static_orig, static_new)
-    patch_file(dynamic_file, dynamic_offset, dynamic_orig, dynamic_new)
+    results = [
+        patch_file(static_file, static_offset, static_orig, static_new),
+        patch_file(dynamic_file, dynamic_offset, dynamic_orig, dynamic_new),
+    ]
+
+    # Non-zero exit so wrappers (apply_patches.sh) can detect failure:
+    # any hard failure, or nothing patched because no binaries were found.
+    if False in results or all(r is None for r in results):
+        sys.exit(1)

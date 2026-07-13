@@ -166,6 +166,7 @@ validate_instance_name() {
 
     if [ -d "${BF_HOME}/instances/${name}" ]; then
         log_error "Instance '$name' already exists."
+        log_info "To reinstall it, remove it first: sudo ./bf1942_manager.sh remove $name"
         return 1
     fi
 
@@ -584,10 +585,9 @@ else
 
     log_info "Calculating CPU affinity..."
 
-    # Use the instance's registry position so its core assignment is
-    # deterministic and survives other instances being removed.
-    INSTANCE_NUM=$(awk -F= -v n="$INSTANCE_NAME" '$1==n{print NR-1; exit}' "$INSTANCE_REGISTRY" 2>/dev/null || true)
-    CPU_AFFINITY=$(calculate_cpu_affinity "${INSTANCE_NUM:-0}")
+    # Key the core assignment to the persistent instance ID - registry line
+    # positions shift when an instance is removed, the ID never does.
+    CPU_AFFINITY=$(calculate_cpu_affinity "$INSTANCE_ID")
 
     log_success "CPU affinity: ${CPU_AFFINITY}"
 fi
@@ -734,8 +734,19 @@ if [ ! -f "/etc/bf1942_deps_installed" ]; then
 
     pushd "$TEMP_DIR" > /dev/null
 
-    DEB_GCC="http://deb.debian.org/debian/pool/main/g/gcc-3.3"
-    wget -q "${DEB_GCC}/libstdc++5_3.3.6-34_i386.deb"
+    # These exact builds rotate off the main mirror when Debian archives an
+    # old release, so fall back to archive.debian.org before giving up.
+    fetch_legacy_deb() {
+        local path="$1"
+        local file="${path##*/}"
+        wget -q "http://deb.debian.org/debian/${path}" && return 0
+        log_warn "${file} not found on deb.debian.org - trying archive.debian.org..."
+        wget -q "http://archive.debian.org/debian/${path}" && return 0
+        log_error "Could not download ${file} from deb.debian.org or archive.debian.org."
+        return 1
+    }
+
+    fetch_legacy_deb "pool/main/g/gcc-3.3/libstdc++5_3.3.6-34_i386.deb"
 
     ar x libstdc++5_3.3.6-34_i386.deb
     if [ -f data.tar.xz ]; then

@@ -16,31 +16,33 @@ The installer detects your distro and uses the correct tool automatically. This 
 
 ## What Ports Does My Server Use?
 
-Each BF1942 instance uses **3 ports** (BFSMD mode) or **2 ports** (Standalone mode):
+Each instance gets a persistent ID (1–99) recorded in `/etc/bf1942_instances.conf`. The ID is derived from the instance name, and if that ID is already taken the installer probes for the next free one — so two instances can never share ports. All six ports are offsets from that one ID:
 
-### Port Assignment Formula
-
-Ports are calculated from your instance name:
-```
-Instance Hash = hash(instance_name) % 100
-Game Port     = 14567 + Hash
-Query Port    = 23000 + Hash
-Mgmt Port     = 14667 + Hash  (BFSMD only)
-```
+| Port | Formula | Opened by installer? |
+|------|---------|----------------------|
+| Game (UDP) | 14567 + ID | ✅ Yes |
+| Query (UDP) | 23000 + ID | ✅ Yes |
+| Management (TCP) | 14667 + ID | Asked during install (BFSMD only) |
+| GameSpy LAN (UDP) | 22000 + ID | No — only needed for LAN discovery |
+| ASE (UDP) | 14690 + ID | No — ASE master service is defunct |
+| Remote console (TCP) | 4711 + ID | No — use an SSH tunnel if needed |
 
 ### Examples
 
-| Instance Name | Game Port | Query Port | Mgmt Port |
-|---------------|-----------|------------|-----------|
-| server1       | 14600     | 23033      | 14700     |
-| server2       | 14605     | 23038      | 14705     |
-| conquest      | 14620     | 23053      | 14720     |
-| tdm           | 14589     | 23022      | 14689     |
+| Instance Name | ID | Game Port | Query Port | Mgmt Port |
+|---------------|----|-----------|------------|-----------|
+| server1       | 33 | 14600     | 23033      | 14700     |
+| server2       | 38 | 14605     | 23038      | 14705     |
+| conquest      | 61 | 14628     | 23061      | 14728     |
+| tdm           | 81 | 14648     | 23081      | 14748     |
 
-**To see YOUR ports:**
+(IDs shown are what those names hash to on a fresh machine; a collision with an existing instance shifts the ID up, so always check the registry or run:)
+
 ```bash
 ./bf1942_manager.sh ports
 ```
+
+> **Cleanup:** `sudo ./bf1942_manager.sh remove <name>` deletes the plain Game/Query/Management allow-rules it created. IP-restricted rules (Option 2 below) must be removed manually — see [Manual Configuration](#manual-configuration).
 
 ---
 

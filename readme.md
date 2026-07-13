@@ -94,6 +94,8 @@ Password: battlefield
 
 ⚠️ **Change this password immediately after first login.**
 
+The installer also saves a per-instance summary to `/root/.bf1942_credentials_<name>.txt` and appends every generated secret — including the remote-console password (see below) — to `/root/.bf1942_all_credentials.txt` on the server.
+
 ### Steps
 
 1. Open **BFRM client** on Windows
@@ -109,11 +111,11 @@ Password: battlefield
 
 ![Set Server IP](images/bfsmd_ip_addr.png)
 
-**Secure the remote console** — change the default remote console password and set up admin accounts:
+**Secure the remote console** — the installer already sets a unique remote-console login per instance (username `bfadmin`, random password saved to `/root/.bf1942_all_credentials.txt`). Use this screen to change it or add further console admins:
 
 ![Remote Console Security](images/bfsmd_remoteconsole.png)
 
-**Set a default map** — add at least one map to the rotation before the server will start a game:
+**Set the map rotation** — new installs are seeded with Berlin (Conquest) so the server starts immediately; use this screen to build your own rotation:
 
 ![Set Default Map](images/bfsmd_setmap.png)
 
@@ -141,7 +143,8 @@ sudo ./bf1942_manager.sh stop server1
 sudo ./bf1942_manager.sh restart server1
 sudo ./bf1942_manager.sh start-all
 sudo ./bf1942_manager.sh stop-all
-sudo ./bf1942_manager.sh remove server2   # Removes instance (asks for confirmation)
+sudo ./bf1942_manager.sh backup server1   # Full backup incl. systemd unit + sudoers
+sudo ./bf1942_manager.sh remove server2   # Removes instance + its firewall rules (asks for confirmation)
 ```
 
 ### Direct Systemd Commands
@@ -179,25 +182,27 @@ Each instance gets a unique ID (1–99), derived from its name. IDs are recorded
 
 ### Configuration Files
 
+All filenames are lower-case — the stock `fixinstall.sh` lower-cases the entire tree during installation.
+
 **Standalone server:**
 ```
 /home/bf1942_user/bf1942/mods/bf1942/settings/
-├── ServerSettings.con   # Game settings
-└── MapList.con          # Map rotation
+├── serversettings.con   # Game settings
+└── maplist.con          # Map rotation
 ```
 
 **BFSMD instance:**
 ```
 /home/bf1942_user/instances/<name>/mods/bf1942/settings/
-├── servermanager.con    # BFSMD settings
+├── servermanager.con    # BFSMD settings (ports, console login)
 ├── useraccess.con       # Admin accounts
-├── ServerSettings.con   # Game settings
-└── MapList.con          # Map rotation
+├── serversettings.con   # Game settings
+└── servermaplist.con    # Map rotation (BFSMD reads this, not maplist.con)
 ```
 
 **Editing config:**
 ```bash
-nano /home/bf1942_user/instances/server1/mods/bf1942/settings/ServerSettings.con
+nano /home/bf1942_user/instances/server1/mods/bf1942/settings/serversettings.con
 # Restart to apply:
 sudo systemctl restart bfsmd-server1.service
 ```
@@ -321,7 +326,7 @@ sudo ss -tulnp | grep 14567                  # Port actually listening?
 ```
 
 ### Port Conflict During Install
-- Try a different instance name (ports are derived from the name hash)
+- Instance IDs (and therefore ports) are recorded in `/etc/bf1942_instances.conf` — the installer probes for a free ID automatically, so a conflict means something outside this tool is using the port
 - Check what's already assigned: `./bf1942_manager.sh ports`
 
 ### Can't Login to BFRM
@@ -345,13 +350,21 @@ The script warns if you exceed the recommended ceiling but won't block you:
 | 8 | 16 |
 
 ### Backup & Restore
+
+The manager creates a full backup — the instance directory plus a `<name>.meta/` folder containing the systemd unit, sudoers file, and registry entry, so the instance can be rebuilt on a clean machine:
+
 ```bash
-# Backup settings
-sudo tar -czf server1-backup-$(date +%F).tar.gz \
+sudo ./bf1942_manager.sh backup server1
+# → /root/bf1942_backups/bf1942_server1_backup_<timestamp>.tar.gz
+```
+
+For a quick settings-only snapshot:
+```bash
+sudo tar -czf server1-settings-$(date +%F).tar.gz \
   /home/bf1942_user/instances/server1/mods/bf1942/settings/
 
-# Restore
-sudo tar -xzf server1-backup-*.tar.gz -C /
+# Restore settings
+sudo tar -xzf server1-settings-*.tar.gz -C /
 sudo systemctl restart bfsmd-server1.service
 ```
 
@@ -359,7 +372,7 @@ sudo systemctl restart bfsmd-server1.service
 ```bash
 sudo cp -r /home/bf1942_user/instances/server1/mods/bf1942/settings/* \
            /home/bf1942_user/instances/server2/mods/bf1942/settings/
-# Update the port in ServerSettings.con, then restart server2
+# Update the ports in serversettings.con and servermanager.con, then restart server2
 ```
 
 ---
@@ -382,8 +395,12 @@ bf1942-linux/
 │   └── centos/
 │       └── centos_stream9_bfsmd_setup.sh
 ├── patches/
-│   └── patch-existing-logging.sh   # Enable XML event logging on existing installs
+│   ├── apply_patches.sh            # Stop → patch → restart wrapper for the .py patches
+│   ├── patch-existing-logging.sh   # Enable XML event logging on existing installs
+│   ├── patch_ctf_respawn.py        # Binary patch: CTF respawn bug (both lnxded binaries)
+│   └── patch_ctf_flags_map.py      # Binary patch: CTF flags on map-vote screen
 ├── firewall_guide.md
+├── LICENSE
 └── readme.md
 ```
 
@@ -391,7 +408,15 @@ bf1942-linux/
 
 ## 🛠️ Applying Patches
 
-The `patches/` folder contains scripts that fix known server bugs — including `patch-existing-logging.sh` for enabling XML event logging on servers installed before it became the default (see [XML Event Logging](#-xml-event-logging)). See each patch file for details and application instructions.
+The `patches/` folder contains scripts that fix known server bugs — including `patch-existing-logging.sh` for enabling XML event logging on servers installed before it became the default (see [XML Event Logging](#-xml-event-logging)). See each patch file for details.
+
+The binary patches (`patch_*.py`) are applied with the wrapper, which stops the service, patches both server binaries, and restarts:
+
+```bash
+sudo ./patches/apply_patches.sh              # list instances and patches
+sudo ./patches/apply_patches.sh all          # patch every instance
+sudo ./patches/apply_patches.sh <name>       # patch one instance
+```
 
 ---
 
@@ -431,7 +456,7 @@ The `patches/` folder contains scripts that fix known server bugs — including 
 
 ## 📜 License
 
-Scripts released under the **MIT License**.  
+Scripts released under the **MIT License** — see [LICENSE](LICENSE).  
 All Battlefield 1942 game assets remain © Electronic Arts Inc.
 
 ---

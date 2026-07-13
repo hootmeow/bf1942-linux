@@ -238,8 +238,8 @@ show_config() {
         echo "Service File: /etc/systemd/system/bf1942.service"
         echo ""
         echo "Key Files:"
-        echo "  - ServerSettings.con (game settings)"
-        echo "  - MapList.con (map rotation)"
+        echo "  - serversettings.con (game settings)"
+        echo "  - maplist.con (map rotation)"
         echo ""
         return
     fi
@@ -265,8 +265,8 @@ show_config() {
     echo "Key Files:"
     echo "  - servermanager.con (BFSMD settings)"
     echo "  - useraccess.con (admin accounts)"
-    echo "  - ServerSettings.con (game settings)"
-    echo "  - MapList.con (map rotation)"
+    echo "  - serversettings.con (game settings)"
+    echo "  - servermaplist.con (map rotation - BFSMD reads this, not maplist.con)"
     echo ""
 }
 
@@ -599,7 +599,12 @@ remove_instance() {
         log_info "Removal cancelled."
         exit 0
     fi
-    
+
+    # Read the ports now - get_ports needs the config and unit files that
+    # are deleted below.
+    local game_port query_port mgmt_port
+    read -r game_port query_port mgmt_port <<< "$(get_ports "$name")"
+
     log_info "Stopping service..."
     systemctl stop "$service" 2>/dev/null || true
     
@@ -622,17 +627,34 @@ remove_instance() {
     
     log_info "Removing instance files..."
     rm -rf "$instance_path"
-    
+
+    # Best effort: removes the plain allow rules the installer created.
+    # An IP-restricted management rule ("allow from X to any port N") has to
+    # be removed manually - see firewall_guide.md.
+    log_info "Removing firewall rules..."
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+        ufw --force delete allow "${game_port}/udp" >/dev/null 2>&1 || true
+        ufw --force delete allow "${query_port}/udp" >/dev/null 2>&1 || true
+        ufw --force delete allow "${mgmt_port}/tcp" >/dev/null 2>&1 || true
+    fi
+    if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+        firewall-cmd --permanent --remove-port="${game_port}/udp" >/dev/null 2>&1 || true
+        firewall-cmd --permanent --remove-port="${query_port}/udp" >/dev/null 2>&1 || true
+        firewall-cmd --permanent --remove-port="${mgmt_port}/tcp" >/dev/null 2>&1 || true
+        firewall-cmd --reload >/dev/null 2>&1 || true
+    fi
+
     log_info "Reloading systemd..."
     systemctl daemon-reload
-    
+
     log_success "Instance '$name' has been removed."
 }
 
 # Backup instance
 backup_instance() {
+    require_root
     local name="${1:-}"
-    
+
     if [ -z "$name" ]; then
         log_error "Instance name required."
         echo "Usage: $0 backup <instance_name>"
@@ -659,14 +681,30 @@ backup_instance() {
     log_info "Creating backup of instance '$name'..."
     log_info "This may take a minute..."
 
-    if tar -czf "${backup_dir}/${backup_file}" -C "${BF_BASE}" "${name}"; then
+    # Stage the pieces that live outside the instance directory, so the
+    # backup can rebuild the instance on a clean machine (or after remove).
+    local meta_parent
+    meta_parent=$(mktemp -d)
+    local meta_dir="${meta_parent}/${name}.meta"
+    mkdir "$meta_dir"
+    cp "/etc/systemd/system/bfsmd-${name}.service" "$meta_dir/" 2>/dev/null || true
+    cp "/etc/sudoers.d/bf1942_${name}" "$meta_dir/" 2>/dev/null || true
+    grep "^${name}=" "$INSTANCE_REGISTRY" > "${meta_dir}/registry_entry" 2>/dev/null || true
+
+    if tar -czf "${backup_dir}/${backup_file}" -C "${BF_BASE}" "${name}" -C "${meta_parent}" "${name}.meta"; then
+        rm -rf "$meta_parent"
         local size=$(du -h "${backup_dir}/${backup_file}" | cut -f1)
         log_success "Backup created: ${backup_dir}/${backup_file} (${size})"
         echo ""
         echo "To restore this backup:"
-        echo "  sudo tar -xzf ${backup_dir}/${backup_file} -C ${BF_BASE}"
+        echo "  sudo tar -xzf ${backup_dir}/${backup_file} -C ${BF_BASE} ${name}"
         echo "  sudo systemctl restart bfsmd-${name}.service"
+        echo ""
+        echo "The archive also contains ${name}.meta/ with the systemd unit,"
+        echo "sudoers file, and registry entry (append it to ${INSTANCE_REGISTRY})"
+        echo "for rebuilding the instance on a clean machine."
     else
+        rm -rf "$meta_parent"
         log_error "Backup failed!"
         exit 1
     fi

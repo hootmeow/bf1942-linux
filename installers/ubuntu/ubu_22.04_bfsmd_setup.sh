@@ -1098,9 +1098,6 @@ if [ "$INSTALL_MODE" = "standalone" ]; then
         sed -i "s/game\.serverEventLogCompression [0-9]*/game.serverEventLogCompression 0/" "${SETTINGS_DIR}/serversettings.con"
         log_success "Event logging enabled"
     fi
-    # XML event logs (ev_*.xml) land here; pre-creating it lets stats
-    # collectors watch the path immediately.
-    mkdir -p "${BF_ROOT}/mods/bf1942/logs"
 fi
 
 if [ "$INSTALL_MODE" = "bfsmd" ]; then
@@ -1162,9 +1159,6 @@ game.setCurrentLevel berlin GPM_CQ bf1942
         log_success "Seeded default map rotation (berlin GPM_CQ)"
     fi
 
-    # XML event logs (ev_*.xml) land here; the engine creates it on first
-    # start, but pre-creating it lets stats collectors watch it immediately.
-    mkdir -p "${BF_ROOT}/mods/bf1942/logs"
 
     # Don't modify useraccess.con - it already has the correct default hash
     # Just set credentials for display to user

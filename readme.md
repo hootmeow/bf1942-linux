@@ -235,8 +235,10 @@ sudo systemctl restart bfsmd-server1.service
 The game server can log every in-game event (kills, scores, round stats) to XML files — the data source for player-statistics tools. Logs are written per round to:
 
 ```
-<server-root>/mods/bf1942/logs/ev_<port>-<date>_<time>.xml
+<server-root>/mods/<active mod>/logs/ev_<port>-<date>_<time>.xml
 ```
+
+The logging flags live in the base `mods/bf1942/settings` files, but the engine writes the log files under whichever mod the server is actually running (e.g. `mods/dc_final/logs/` for a Desert Combat server). Stats collectors should watch `mods/*/logs/`, not a single hardcoded path.
 
 **New installs:** event logging is enabled automatically by the setup scripts (`game.serverEventLogging 1`, compression off).
 
@@ -252,7 +254,7 @@ sudo ./patch-existing-logging.sh                  # auto-detect installs under /
 sudo ./patch-existing-logging.sh /path/to/server  # or pass server root(s) explicitly
 ```
 
-The script sets `game.serverEventLogging 1` and `game.serverEventLogCompression 0` in `serversettings.con` and (on BFSMD installs) `servermanager.con`, and creates the `mods/bf1942/logs` folder. Ports, server name, credentials, and map rotation are left exactly as they are, and every edited file is backed up first as `<name>.bak-logging-<timestamp>`.
+The script sets `game.serverEventLogging 1` and `game.serverEventLogCompression 0` in `serversettings.con` and (on BFSMD installs) `servermanager.con`. Ports, server name, credentials, and map rotation are left exactly as they are, and every edited file is backed up first as `<name>.bak-logging-<timestamp>`.
 
 Then restart the server to apply:
 
@@ -272,7 +274,7 @@ game.serverEventLogCompression 0
 
 - **Keep compression off.** Compressed `.zxml` logs are flushed to disk in deferred blocks — a server stop or crash can lose the entire round, and stats tools expect plain `.xml`.
 - One file is written per round and closed with `</bf:log>` when the round ends. Stopping or restarting the server kills the game process hard, so the file for an in-progress round is always left truncated — only completed rounds produce well-formed logs.
-- The `logs` folder is created automatically by the engine on first start if missing.
+- The `logs` folder is created automatically by the engine on first start, inside the active mod's directory.
 
 ---
 

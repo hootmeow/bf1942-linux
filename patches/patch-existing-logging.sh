@@ -7,7 +7,6 @@
 #
 #    game.serverEventLogging 1       (in serversettings.con and, if present,
 #    game.serverEventLogCompression 0     servermanager.con)
-#    mods/bf1942/logs                (created if missing)
 #
 #  Every other setting (ports, server name, credentials, map rotation) is
 #  left exactly as it is. Edited files are backed up next to the original
@@ -96,15 +95,6 @@ patch_install() {
         return
     fi
 
-    # The engine creates this itself on first start, but pre-creating it lets
-    # log collectors start watching the path immediately.
-    local logs_dir="${root}/mods/bf1942/logs"
-    if [ ! -d "$logs_dir" ]; then
-        mkdir -p "$logs_dir"
-        chown --reference="${root}/mods/bf1942" "$logs_dir" 2>/dev/null || true
-        log_success "  Created ${logs_dir}"
-    fi
-
     PATCHED_ROOTS+=("$root")
 }
 
@@ -136,7 +126,8 @@ if [ "$PATCHED_ANY" -eq 1 ]; then
     log_warn "Restart the affected server(s) for the change to take effect:"
     echo "         standalone:      sudo systemctl restart bf1942.service"
     echo "         BFSMD instance:  sudo systemctl restart bfsmd-<name>.service"
-    log_info "Event logs will appear as mods/bf1942/logs/ev_<port>-<date>.xml"
+    log_info "Event logs will appear as mods/<active mod>/logs/ev_<port>-<date>.xml"
+    log_info "(the engine creates the logs folder itself on first start)"
 else
     log_success "Nothing to change - event logging is already configured everywhere."
 fi

@@ -21,6 +21,7 @@ Automated setup for running **Battlefield 1942 Dedicated Servers** on modern 64-
 
 | Distro | Script |
 |--------|--------|
+| **Arch Linux** | `installers/arch/arch_bfsmd_setup.sh` |
 | **Ubuntu 24.04 LTS** | `installers/ubuntu/ubu_24.0.3_bfsmd_setup.sh` |
 | **Ubuntu 22.04 LTS** | `installers/ubuntu/ubu_22.04_bfsmd_setup.sh` |
 | **Debian 12 (Bookworm) / 13 (Trixie)** | `installers/debian/deb_12_bfsmd_setup.sh` |
@@ -406,6 +407,8 @@ sudo cp -r /home/bf1942_user/instances/server1/mods/bf1942/settings/* \
 bf1942-linux/
 ├── bf1942_manager.sh          # Shared management tool (all distros)
 ├── installers/
+│   ├── arch/
+│   │   └── arch_bfsmd_setup.sh
 │   ├── ubuntu/
 │   │   ├── ubu_24.0.3_bfsmd_setup.sh
 │   │   └── ubu_22.04_bfsmd_setup.sh

@@ -1061,7 +1061,9 @@ if [ ! -f "/etc/bf1942_deps_installed" ]; then
     # The package steps above tolerate individual failures, so verify the
     # legacy libraries actually landed before recording success - otherwise
     # a broken install would be skipped forever on re-runs.
-    if ldconfig -p | grep -q 'libstdc++\.so\.5' && ldconfig -p | grep -q 'libncurses\.so\.5'; then
+    if legacy_libs=$(ldconfig -p) &&
+        grep -q 'libstdc++\.so\.5' <<< "$legacy_libs" &&
+        grep -q 'libncurses\.so\.5' <<< "$legacy_libs"; then
         touch /etc/bf1942_deps_installed
         log_success "Dependencies installed."
     else

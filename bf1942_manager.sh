@@ -17,14 +17,24 @@ BF_USER="bf1942_user"
 BF_BASE="/home/${BF_USER}/instances"
 BF_STANDALONE="/home/${BF_USER}/bf1942"
 
-# Colors
-RED='\e[31m'
-GREEN='\e[32m'
-YELLOW='\e[33m'
-BLUE='\e[34m'
-CYAN='\e[36m'
-BOLD='\e[1m'
-NC='\e[0m'
+# Colors & formatting: use ANSI-C quoting ($'\e[...') so escape codes render properly in terminals
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != "dumb" ]; then
+    RED=$'\e[31m'
+    GREEN=$'\e[32m'
+    YELLOW=$'\e[33m'
+    BLUE=$'\e[34m'
+    CYAN=$'\e[36m'
+    BOLD=$'\e[1m'
+    NC=$'\e[0m'
+else
+    RED=''
+    GREEN=''
+    YELLOW=''
+    BLUE=''
+    CYAN=''
+    BOLD=''
+    NC=''
+fi
 
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
@@ -100,6 +110,51 @@ service_exists() {
     [ -f "/etc/systemd/system/${service}" ]
 }
 
+# Discover all instance names across filesystem, registry, and systemd units
+get_instance_names() {
+    local -A seen
+    local names=()
+
+    # 1. From directory if accessible
+    if [ -d "$BF_BASE" ] && [ -r "$BF_BASE" ]; then
+        for instance_dir in "$BF_BASE"/*; do
+            if [ -d "$instance_dir" ]; then
+                local iname
+                iname=$(basename "$instance_dir")
+                if [ -n "$iname" ] && [ -z "${seen[$iname]:-}" ]; then
+                    seen["$iname"]=1
+                    names+=("$iname")
+                fi
+            fi
+        done
+    fi
+
+    # 2. From registry file (/etc/bf1942_instances.conf)
+    if [ -f "$INSTANCE_REGISTRY" ] && [ -r "$INSTANCE_REGISTRY" ]; then
+        while IFS='=' read -r iname iid || [ -n "$iname" ]; do
+            [[ "$iname" =~ ^#.*$ || -z "$iname" ]] && continue
+            if [ -z "${seen[$iname]:-}" ]; then
+                seen["$iname"]=1
+                names+=("$iname")
+            fi
+        done < "$INSTANCE_REGISTRY"
+    fi
+
+    # 3. From active systemd services (bfsmd-*.service)
+    for service_unit in /etc/systemd/system/bfsmd-*.service; do
+        if [ -f "$service_unit" ]; then
+            local iname
+            iname=$(basename "$service_unit" .service | sed 's/^bfsmd-//')
+            if [ -n "$iname" ] && [ "$iname" != "*" ] && [ -z "${seen[$iname]:-}" ]; then
+                seen["$iname"]=1
+                names+=("$iname")
+            fi
+        fi
+    done
+
+    echo "${names[@]:-}"
+}
+
 # List all instances
 list_instances() {
     echo -e "${BOLD}BF1942 Server Instances${NC}"
@@ -121,36 +176,34 @@ list_instances() {
     fi
     
     # Check for BFSMD instances
-    if [ -d "$BF_BASE" ]; then
-        for instance_dir in "$BF_BASE"/*; do
-            if [ -d "$instance_dir" ]; then
-                local name=$(basename "$instance_dir")
-                local service="bfsmd-${name}.service"
-                
-                if service_exists "$service"; then
-                    local status=$(systemctl is-active "$service" 2>/dev/null || echo "inactive")
-                    local enabled=$(systemctl is-enabled "$service" 2>/dev/null || echo "disabled")
-                    
-                    local status_color="${RED}"
-                    [ "$status" == "active" ] && status_color="${GREEN}"
-                    
-                    read game_port query_port mgmt_port <<< $(get_ports "$name")
-                    
-                    printf "  ${CYAN}%-20s${NC} ${status_color}%-10s${NC} (${enabled}) [Game:%-5s Query:%-5s Mgmt:%-5s]\n" \
-                        "$name" "$status" "$game_port" "$query_port" "$mgmt_port"
-                    found=1
-                else
-                    printf "  ${CYAN}%-20s${NC} ${RED}%-10s${NC} (no service)\n" "$name" "ERROR"
-                    found=1
-                fi
-            fi
-        done
-    fi
+    local instance_names=($(get_instance_names))
+    for name in "${instance_names[@]}"; do
+        [ -z "$name" ] && continue
+        local service="bfsmd-${name}.service"
+        
+        if service_exists "$service"; then
+            local status=$(systemctl is-active "$service" 2>/dev/null || echo "inactive")
+            local enabled=$(systemctl is-enabled "$service" 2>/dev/null || echo "disabled")
+            
+            local status_color="${RED}"
+            [ "$status" == "active" ] && status_color="${GREEN}"
+            
+            read game_port query_port mgmt_port <<< $(get_ports "$name")
+            
+            printf "  ${CYAN}%-20s${NC} ${status_color}%-10s${NC} (${enabled}) [Game:%-5s Query:%-5s Mgmt:%-5s]\n" \
+                "$name" "$status" "$game_port" "$query_port" "$mgmt_port"
+            found=1
+        else
+            printf "  ${CYAN}%-20s${NC} ${RED}%-10s${NC} (no service)\n" "$name" "ERROR"
+            found=1
+        fi
+    done
     
     if [ $found -eq 0 ]; then
         log_warn "No instances found."
         echo ""
         echo "To create an instance, pick the script for your distro:"
+        echo "  sudo ./installers/arch/arch_bfsmd_setup.sh         [instance_name]"
         echo "  sudo ./installers/ubuntu/ubu_24.0.3_bfsmd_setup.sh [instance_name]"
         echo "  sudo ./installers/ubuntu/ubu_22.04_bfsmd_setup.sh  [instance_name]"
         echo "  sudo ./installers/debian/deb_12_bfsmd_setup.sh     [instance_name]"
@@ -175,16 +228,13 @@ show_ports() {
     fi
     
     # BFSMD instances
-    if [ -d "$BF_BASE" ]; then
-        for instance_dir in "$BF_BASE"/*; do
-            if [ -d "$instance_dir" ]; then
-                local name=$(basename "$instance_dir")
-                read game_port query_port mgmt_port <<< $(get_ports "$name")
-                printf "%-20s %-15s %-15s %-15s\n" \
-                    "$name" "$game_port (UDP)" "$query_port (UDP)" "$mgmt_port (TCP)"
-            fi
-        done
-    fi
+    local instance_names=($(get_instance_names))
+    for name in "${instance_names[@]}"; do
+        [ -z "$name" ] && continue
+        read game_port query_port mgmt_port <<< $(get_ports "$name")
+        printf "%-20s %-15s %-15s %-15s\n" \
+            "$name" "$game_port (UDP)" "$query_port (UDP)" "$mgmt_port (TCP)"
+    done
     
     echo ""
 }
@@ -302,25 +352,22 @@ health_check() {
     fi
     
     # Check BFSMD instances
-    if [ -d "$BF_BASE" ]; then
-        for instance_dir in "$BF_BASE"/*; do
-            if [ -d "$instance_dir" ]; then
-                local name=$(basename "$instance_dir")
-                local service="bfsmd-${name}.service"
-                
-                if service_exists "$service"; then
-                    total=$((total + 1))
-                    if systemctl is-active --quiet "$service"; then
-                        active=$((active + 1))
-                        echo -e "  ${GREEN}✓${NC} $name - Running"
-                    else
-                        issues=$((issues + 1))
-                        echo -e "  ${RED}✗${NC} $name - Not running"
-                    fi
-                fi
+    local instance_names=($(get_instance_names))
+    for name in "${instance_names[@]}"; do
+        [ -z "$name" ] && continue
+        local service="bfsmd-${name}.service"
+        
+        if service_exists "$service"; then
+            total=$((total + 1))
+            if systemctl is-active --quiet "$service"; then
+                active=$((active + 1))
+                echo -e "  ${GREEN}✓${NC} $name - Running"
+            else
+                issues=$((issues + 1))
+                echo -e "  ${RED}✗${NC} $name - Not running"
             fi
-        done
-    fi
+        fi
+    done
     
     echo ""
     echo "Summary: $active/$total instances running"
@@ -758,20 +805,14 @@ start_all() {
     fi
     
     # BFSMD instances
-    if [ -d "$BF_BASE" ]; then
-        for dir in "$BF_BASE"/*; do
-            if [ -d "$dir" ]; then
-                local name=$(basename "$dir")
-                local service="bfsmd-${name}.service"
-                
-                if [ -f "/etc/systemd/system/${service}" ]; then
-                    systemctl start "${service}"
-                    ((count++)) || true
-                    echo "  Started: $name"
-                fi
-            fi
-        done
-    fi
+    for name in $(get_instance_names); do
+        local service="bfsmd-${name}.service"
+        if [ -f "/etc/systemd/system/${service}" ]; then
+            systemctl start "${service}"
+            ((count++)) || true
+            echo "  Started: $name"
+        fi
+    done
     
     echo ""
     log_success "Started $count instance(s)"
@@ -794,20 +835,14 @@ stop_all() {
     fi
     
     # BFSMD instances
-    if [ -d "$BF_BASE" ]; then
-        for dir in "$BF_BASE"/*; do
-            if [ -d "$dir" ]; then
-                local name=$(basename "$dir")
-                local service="bfsmd-${name}.service"
-                
-                if [ -f "/etc/systemd/system/${service}" ]; then
-                    systemctl stop "${service}"
-                    ((count++)) || true
-                    echo "  Stopped: $name"
-                fi
-            fi
-        done
-    fi
+    for name in $(get_instance_names); do
+        local service="bfsmd-${name}.service"
+        if [ -f "/etc/systemd/system/${service}" ]; then
+            systemctl stop "${service}"
+            ((count++)) || true
+            echo "  Stopped: $name"
+        fi
+    done
     
     echo ""
     log_success "Stopped $count instance(s)"
@@ -830,20 +865,14 @@ restart_all() {
     fi
     
     # BFSMD instances
-    if [ -d "$BF_BASE" ]; then
-        for dir in "$BF_BASE"/*; do
-            if [ -d "$dir" ]; then
-                local name=$(basename "$dir")
-                local service="bfsmd-${name}.service"
-                
-                if [ -f "/etc/systemd/system/${service}" ]; then
-                    systemctl restart "${service}"
-                    ((count++)) || true
-                    echo "  Restarted: $name"
-                fi
-            fi
-        done
-    fi
+    for name in $(get_instance_names); do
+        local service="bfsmd-${name}.service"
+        if [ -f "/etc/systemd/system/${service}" ]; then
+            systemctl restart "${service}"
+            ((count++)) || true
+            echo "  Restarted: $name"
+        fi
+    done
     
     echo ""
     log_success "Restarted $count instance(s)"
@@ -851,8 +880,7 @@ restart_all() {
 
 # Show usage
 show_usage() {
-    cat << EOF
-${BOLD}BF1942 Multi-Instance Manager v${VERSION}${NC}
+    echo -e "${BOLD}BF1942 Multi-Instance Manager v${VERSION}${NC}
 
 ${BOLD}Usage:${NC} $0 [command] [instance_name]
 
@@ -888,8 +916,7 @@ ${BOLD}Notes:${NC}
   - Commands that modify services require sudo
   - Use 'default' for standalone server instance
   - Instance names are case-sensitive
-  - Run 'security' regularly to check for issues
-EOF
+  - Run 'security' regularly to check for issues"
 }
 
 # Main command handler

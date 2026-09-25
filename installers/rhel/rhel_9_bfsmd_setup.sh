@@ -94,8 +94,17 @@ log_success() { echo -e "  ${GREEN}${BOLD}✔${NC} $1"; }
 log_warn()    { echo -e "  ${YELLOW}${BOLD}⚠${NC} ${YELLOW}$1${NC}"; }
 log_info()    { echo -e "  ${BLUE}${BOLD}▸${NC} $1"; }
 log_step() {
+    local label="$1"
     echo ""
-    echo -e "${C_KHAKI}${BOLD}▶ $1${NC}"
+    echo -e "${C_KHAKI}${BOLD}▶ ${label}${NC}"
+    if [ -t 1 ] && [[ "$label" =~ ^([1-8])/8: ]]; then
+        local current="${BASH_REMATCH[1]}"
+        local filled="" empty="" i
+        for ((i=0; i<8; i++)); do
+            if ((i < current)); then filled+="■"; else empty+="·"; fi
+        done
+        echo -e "  ${C_OLIVE}[${filled}${C_STEEL}${empty}${C_OLIVE}]${NC} ${C_STEEL}MISSION PROGRESS ${current}/8${NC}"
+    fi
     echo -e "${C_ARMY}${HR_LINE}${NC}"
 }
 

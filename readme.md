@@ -17,16 +17,18 @@ Automated setup for running **Battlefield 1942 Dedicated Servers** on modern 64-
 
 ---
 
-## 🧪 Supported Distributions
+## 🧪 Installer Targets
 
 | Distro | Script |
 |--------|--------|
 | **Ubuntu 24.04 LTS** | `installers/ubuntu/ubu_24.0.3_bfsmd_setup.sh` |
 | **Ubuntu 22.04 LTS** | `installers/ubuntu/ubu_22.04_bfsmd_setup.sh` |
 | **Debian 12 (Bookworm) / 13 (Trixie)** | `installers/debian/deb_12_bfsmd_setup.sh` |
-| **Fedora 40 / 41** | `installers/fedora/fed_40_bfsmd_setup.sh` |
+| **Fedora 44** *(runtime validation pending)* | `installers/fedora/fed_44_bfsmd_setup.sh` |
 | **RHEL 9** | `installers/rhel/rhel_9_bfsmd_setup.sh` |
 | **CentOS Stream 9** | `installers/centos/centos_stream9_bfsmd_setup.sh` |
+
+Fedora has no LTS release; the RHEL 9 installer is the longer-support option.
 
 ---
 
@@ -79,6 +81,7 @@ sudo ./<your-setup-script>.sh --yes --mode standalone
 | `--ip` | `local`, `public`, literal address | `local` |
 | `--version` | `2.0`, `2.01` | `2.0` |
 | `--firewall` | `skip`, `open`, `tunnel`, `restrict=ADDR` | `skip` |
+| `--allow-unverified-downloads` | flag | Off; supply it to continue after a hash warning |
 
 Run any installer with `--help` for the full reference. The flags also work without `--yes` to pre-answer individual prompts in an otherwise interactive run.
 
@@ -98,7 +101,7 @@ Each instance automatically gets unique ports, its own systemd service, and dedi
 | Ubuntu 24.04 | Uses `libcurl4t64:i386` (auto-detected) |
 | Ubuntu 22.04 | Uses `libcurl4:i386` |
 | Debian 12/13 | Auto-detects `libcurl4` vs `libcurl4t64` at runtime |
-| Fedora 40/41 | `dnf` + `.i686` packages, firewalld, SELinux (`restorecon`), zlib-ng auto-detection |
+| Fedora 44 | `dnf` + `.i686` packages, firewalld, SELinux (`restorecon`), zlib-ng auto-detection |
 | RHEL 9 | Same as Fedora + automatically enables EPEL and CRB repos |
 | CentOS Stream 9 | Same as RHEL 9 |
 
@@ -412,7 +415,7 @@ bf1942-linux/
 │   ├── debian/
 │   │   └── deb_12_bfsmd_setup.sh
 │   ├── fedora/
-│   │   └── fed_40_bfsmd_setup.sh
+│   │   └── fed_44_bfsmd_setup.sh
 │   ├── rhel/
 │   │   └── rhel_9_bfsmd_setup.sh
 │   └── centos/

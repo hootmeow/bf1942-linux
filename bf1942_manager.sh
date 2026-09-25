@@ -39,6 +39,16 @@ require_root() {
     fi
 }
 
+# Match the installer's naming rules before using a name in paths or units.
+validate_instance_name() {
+    local name="$1"
+    if [ "$name" = "default" ] || [[ "$name" =~ ^[a-zA-Z][a-zA-Z0-9_-]{2,19}$ ]]; then
+        return 0
+    fi
+    log_error "Invalid instance name '$name' (expected 3-20 letters, digits, dashes, or underscores, starting with a letter)."
+    return 1
+}
+
 # Written by the installer: one "name=id" line per instance
 INSTANCE_REGISTRY="/etc/bf1942_instances.conf"
 
@@ -144,7 +154,7 @@ list_instances() {
         echo "  sudo ./installers/ubuntu/ubu_24.0.3_bfsmd_setup.sh [instance_name]"
         echo "  sudo ./installers/ubuntu/ubu_22.04_bfsmd_setup.sh  [instance_name]"
         echo "  sudo ./installers/debian/deb_12_bfsmd_setup.sh     [instance_name]"
-        echo "  sudo ./installers/fedora/fed_40_bfsmd_setup.sh     [instance_name]"
+        echo "  sudo ./installers/fedora/fed_44_bfsmd_setup.sh     [instance_name]"
         echo "  sudo ./installers/rhel/rhel_9_bfsmd_setup.sh       [instance_name]"
         echo "  sudo ./installers/centos/centos_stream9_bfsmd_setup.sh [instance_name]"
     fi
@@ -586,6 +596,19 @@ remove_instance() {
     
     local service="bfsmd-${name}.service"
     local instance_path="${BF_BASE}/${name}"
+
+    # Only remove a real directory directly under the instances directory.
+    if [ ! -d "$instance_path" ] || [ -L "$instance_path" ]; then
+        log_error "Instance '$name' is not a regular instance directory."
+        exit 1
+    fi
+    local base_real target_real
+    base_real=$(realpath -e -- "$BF_BASE")
+    target_real=$(realpath -e -- "$instance_path")
+    if [ "$(dirname -- "$target_real")" != "$base_real" ]; then
+        log_error "Instance '$name' resolves outside $BF_BASE."
+        exit 1
+    fi
     
     log_warn "You are about to PERMANENTLY remove instance '$name'."
     echo "  Service: $service"
@@ -598,6 +621,13 @@ remove_instance() {
     if [ "$confirm" != "yes" ]; then
         log_info "Removal cancelled."
         exit 0
+    fi
+
+    # Keep the base directory open so a path rename cannot redirect rm.
+    pushd "$BF_BASE" >/dev/null
+    if [ "$(pwd -P)" != "$base_real" ] || [ ! -d "$name" ] || [ -L "$name" ]; then
+        log_error "Instance directory changed during removal; refusing to delete it."
+        exit 1
     fi
 
     # Read the ports now - get_ports needs the config and unit files that
@@ -626,7 +656,8 @@ remove_instance() {
     fi
     
     log_info "Removing instance files..."
-    rm -rf "$instance_path"
+    rm -rf -- "$name"
+    popd >/dev/null
 
     # Best effort: removes the plain allow rules the installer created.
     # An IP-restricted management rule ("allow from X to any port N") has to
@@ -864,6 +895,14 @@ EOF
 # Main command handler
 main() {
     local command="${1:-}"
+
+    case "$command" in
+        status|config|start|stop|restart|backup|logs|remove)
+            if [ -n "${2:-}" ]; then
+                validate_instance_name "$2" || exit 1
+            fi
+            ;;
+    esac
     
     case "$command" in
         list)

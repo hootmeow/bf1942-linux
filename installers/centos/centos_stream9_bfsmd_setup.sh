@@ -15,6 +15,46 @@
 
 set -euo pipefail
 
+# SHA-256 pins for downloaded server archives and legacy packages.
+SERVER_SHA_STANDALONE="6b6a2fc293385636881474dff37f248b67df299431797d43050725c2f0938b8e"
+SERVER_SHA_BFSMD_20="f499494d74e5301f82f71077798a531575467df95ccbe4077df99fec29ea909a"
+SERVER_SHA_BFSMD_201="44eaff4270f0c3d615d47d1153acf5f26ccc67a8b9d18a7d5b74a6a860516598"
+LIBSTDC5_SHA="55d14a8e77551f500b61893a006d960872a35a29229c782acfa7f8cd48d21063"
+LIBTINFO5_SHA="35375adcb232873346377aa7a4ce64483ab4858d3b0ec63c7cf8ec07d12e742f"
+LIBNCURSES5_SHA="80c6cae3f063fcccd5bdabc475692bbc3b0e43de5ad1e272a3d2b105cbccfc62"
+
+verify_sha256() {
+    local expected="$1" file="$2"
+    printf '%s  %s\n' "$expected" "$file" | sha256sum --check --status
+}
+
+accept_unverified_download() {
+    local expected="$1" file="$2" label="$3" actual answer
+    [ -s "$file" ] || return 1
+    actual=$(sha256sum "$file" | awk '{print $1}')
+    log_warn "SHA-256 mismatch for $label"
+    log_warn "Expected: $expected"
+    log_warn "Received: $actual"
+    log_warn "Continuing may install or execute unreviewed third-party code."
+    if [ "$ASSUME_YES" -eq 1 ]; then
+        if [ "${ALLOW_UNVERIFIED_DOWNLOADS:-0}" -ne 1 ]; then
+            log_error "Unattended installation stopped. --yes alone does not bypass checksums."
+            return 1
+        fi
+        log_warn "Explicit --allow-unverified-downloads with --yes: continuing."
+        return 0
+    fi
+    if ! read -r -p "Type UNVERIFIED to continue with this changed download: " answer; then
+        log_error "Checksum override declined. Installation stopped."
+        return 1
+    fi
+    if [ "$answer" != "UNVERIFIED" ]; then
+        log_error "Checksum override declined. Installation stopped."
+        return 1
+    fi
+    return 0
+}
+
 # Configuration
 BF_USER="bf1942_user"
 BF_HOME="/home/${BF_USER}"
@@ -466,6 +506,10 @@ Options:
                              restrict=ADDR = game/query open, management from ADDR only
   --yes, -y                  Never prompt: accept warnings/confirmations and
                              use the defaults above for anything not given.
+  --allow-unverified-downloads
+                             With --yes, continue after a checksum warning.
+                             Interactive use always requires typing
+                             UNVERIFIED at a checksum mismatch.
   --help, -h                 Show this help.
 
 Unattended example:
@@ -490,6 +534,7 @@ OPT_IP=""
 OPT_VERSION=""
 OPT_FIREWALL=""
 ASSUME_YES=0
+ALLOW_UNVERIFIED_DOWNLOADS=0
 ORIG_ARGS="$*"
 
 while [ $# -gt 0 ]; do
@@ -506,6 +551,10 @@ while [ $# -gt 0 ]; do
                 --firewall) OPT_FIREWALL="$2" ;;
             esac
             shift 2
+            ;;
+        --allow-unverified-downloads)
+            ALLOW_UNVERIFIED_DOWNLOADS=1
+            shift
             ;;
         --yes|-y)
             ASSUME_YES=1
@@ -564,7 +613,6 @@ cleanup() {
     if [ -n "${TEMP_DIR:-}" ] && [ -d "$TEMP_DIR" ]; then
         rm -rf "$TEMP_DIR"
     fi
-    rm -f "${BF_HOME}/.bf1942_server_download.tar" 2>/dev/null || true
     # Give the instance ID back if the install never got as far as creating
     # the instance (cancelled prompt, failed download, port conflict, ...).
     if [ "$REGISTRY_ENTRY_ADDED" -eq 1 ] && [ "$INSTALL_COMPLETE" -eq 0 ]; then
@@ -873,7 +921,8 @@ fi
 # ------------------------------------------------------------
 # SAFETY: temp workspace (removed by the EXIT trap set at argument parsing)
 # ------------------------------------------------------------
-TEMP_DIR=$(mktemp -d)
+# Private, disk-backed space for the large server archive.
+TEMP_DIR=$(mktemp -d /var/tmp/bf1942-install.XXXXXXXX)
 
 if [ -d "$BF_ROOT" ] && [ "$(ls -A "$BF_ROOT" 2>/dev/null)" ]; then
     log_warn "Target directory '$BF_ROOT' already exists and is not empty."
@@ -949,15 +998,37 @@ if [ ! -f "/etc/bf1942_deps_installed" ]; then
     # old release, so fall back to archive.debian.org before giving up.
     fetch_legacy_deb() {
         local path="$1"
+        local expected="$2"
         local file="${path##*/}"
-        wget -q "http://deb.debian.org/debian/${path}" && return 0
-        log_warn "${file} not found on deb.debian.org - trying archive.debian.org..."
-        wget -q "http://archive.debian.org/debian/${path}" && return 0
-        log_error "Could not download ${file} from deb.debian.org or archive.debian.org."
+        local primary="${file}.primary" archive="${file}.archive" candidate=""
+
+        if wget -q -O "$primary" "https://deb.debian.org/debian/${path}"; then
+            if verify_sha256 "$expected" "$primary"; then
+                mv -f "$primary" "$file"
+                return 0
+            fi
+            candidate="$primary"
+        fi
+        log_warn "Verified ${file} unavailable on deb.debian.org; trying archive.debian.org..."
+        if wget -q -O "$archive" "https://archive.debian.org/debian/${path}"; then
+            if verify_sha256 "$expected" "$archive"; then
+                mv -f "$archive" "$file"
+                rm -f "$primary"
+                return 0
+            fi
+            [ -n "$candidate" ] || candidate="$archive"
+        fi
+        if [ -n "$candidate" ] && accept_unverified_download "$expected" "$candidate" "$file"; then
+            mv -f "$candidate" "$file"
+            rm -f "$primary" "$archive"
+            return 0
+        fi
+        rm -f "$primary" "$archive"
+        log_error "Could not download an accepted copy of ${file}."
         return 1
     }
 
-    fetch_legacy_deb "pool/main/g/gcc-3.3/libstdc++5_3.3.6-34_i386.deb"
+    fetch_legacy_deb "pool/main/g/gcc-3.3/libstdc++5_3.3.6-34_i386.deb" "$LIBSTDC5_SHA"
 
     ar x libstdc++5_3.3.6-34_i386.deb
     if [ -f data.tar.xz ]; then
@@ -1044,11 +1115,16 @@ fi
 # ------------------------------------------------------------
 log_step "4/8: Downloading and installing server files"
 
+case "$SERVER_TAR_URL" in
+    */linux-bf1942-server-bfsm-hitreg-201patched.tar) SERVER_TAR_SHA256="$SERVER_SHA_BFSMD_201" ;;
+    */linux-bf1942-server-bfsm-hitreg.tar) SERVER_TAR_SHA256="$SERVER_SHA_BFSMD_20" ;;
+    */linux-bf1942-server.tar) SERVER_TAR_SHA256="$SERVER_SHA_STANDALONE" ;;
+    *) log_error "No known SHA-256 hash for $SERVER_TAR_URL"; exit 1 ;;
+esac
+
 log_info "Downloading from: ${SERVER_TAR_URL}"
 
-# Download to a file first (under /home, not tmpfs - the archive is large)
-# so a dropped connection can't leave a half-extracted install behind.
-SERVER_TAR="${BF_HOME}/.bf1942_server_download.tar"
+SERVER_TAR="${TEMP_DIR}/server.tar"
 rm -f "$SERVER_TAR"
 
 if ! wget -q --show-progress -O "$SERVER_TAR" "$SERVER_TAR_URL"; then
@@ -1057,8 +1133,14 @@ if ! wget -q --show-progress -O "$SERVER_TAR" "$SERVER_TAR_URL"; then
     exit 1
 fi
 
+if ! verify_sha256 "$SERVER_TAR_SHA256" "$SERVER_TAR"; then
+    if ! accept_unverified_download "$SERVER_TAR_SHA256" "$SERVER_TAR" "$SERVER_TAR_URL"; then
+        exit 1
+    fi
+fi
+
 log_info "Extracting..."
-if ! tar -x --strip-components=1 -C "$BF_ROOT" -f "$SERVER_TAR"; then
+if ! tar -x --no-same-owner --strip-components=1 -C "$BF_ROOT" -f "$SERVER_TAR"; then
     rm -f "$SERVER_TAR"
     log_error "Extraction failed."
     exit 1

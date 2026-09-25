@@ -6,7 +6,7 @@
 |--------|--------------|---------------|
 | Ubuntu 24.04 / 22.04 | UFW | `ufw` |
 | Debian 12 / 13 | UFW | `ufw` |
-| Fedora 40 / 41 | firewalld | `firewall-cmd` |
+| Fedora 44 | firewalld | `firewall-cmd` |
 | RHEL 9 | firewalld | `firewall-cmd` |
 | CentOS Stream 9 | firewalld | `firewall-cmd` |
 

@@ -312,15 +312,15 @@ check_port_available() {
 
     if command -v ss >/dev/null 2>&1; then
         if [ "$protocol" = "tcp" ]; then
-            ! ss -tlnp 2>/dev/null | grep -q ":${port} "
+            ! ss -tlnp 2>/dev/null | grep -F ":${port} " >/dev/null
         else
-            ! ss -ulnp 2>/dev/null | grep -q ":${port} "
+            ! ss -ulnp 2>/dev/null | grep -F ":${port} " >/dev/null
         fi
     elif command -v netstat >/dev/null 2>&1; then
         if [ "$protocol" = "tcp" ]; then
-            ! netstat -tlnp 2>/dev/null | grep -q ":${port} "
+            ! netstat -tlnp 2>/dev/null | grep -F ":${port} " >/dev/null
         else
-            ! netstat -ulnp 2>/dev/null | grep -q ":${port} "
+            ! netstat -ulnp 2>/dev/null | grep -F ":${port} " >/dev/null
         fi
     else
         return 0
@@ -625,10 +625,14 @@ fi
 TEMP_DIR=""
 REGISTRY_ENTRY_ADDED=0
 INSTALL_COMPLETE=0
+INSTANCE_DIR_CREATED=0
 
 cleanup() {
     if [ -n "${TEMP_DIR:-}" ] && [ -d "$TEMP_DIR" ]; then
         rm -rf "$TEMP_DIR"
+    fi
+    if [ "$INSTANCE_DIR_CREATED" -eq 1 ] && [ "$INSTALL_COMPLETE" -eq 0 ]; then
+        rmdir -- "$BF_ROOT" 2>/dev/null || true
     fi
     # Give the instance ID back if the install never got as far as creating
     # the instance (cancelled prompt, failed download, port conflict, ...).
@@ -984,7 +988,10 @@ else
     fi
 fi
 
-mkdir -p "$BF_ROOT"
+if [ ! -d "$BF_ROOT" ]; then
+    mkdir -p "$BF_ROOT"
+    INSTANCE_DIR_CREATED=1
+fi
 
 # ------------------------------------------------------------
 # STEP 2: Dependencies
@@ -1231,9 +1238,12 @@ if [ "$INSTALL_MODE" = "bfsmd" ]; then
 
         cp "$SM_CON" "${SM_CON}.bak"
 
-        # 256 random bytes so that at least 12 alphanumerics always survive
-        # the tr filter (64 bytes fell short roughly one run in eight).
-        CONSOLE_PASSWORD=$(dd if=/dev/urandom bs=256 count=1 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 12)
+        # Keep drawing random bytes until 12 alphanumerics are available.
+        CONSOLE_PASSWORD=""
+        while [ "${#CONSOLE_PASSWORD}" -lt 12 ]; do
+            CONSOLE_PASSWORD+="$(dd if=/dev/urandom bs=256 count=1 2>/dev/null | tr -dc 'A-Za-z0-9')"
+        done
+        CONSOLE_PASSWORD="${CONSOLE_PASSWORD:0:12}"
 
         sed -i "s/game\.serverPort [0-9]*/game.serverPort ${GAME_PORT}/" "$SM_CON"
         sed -i "s/game\.gameSpyPort [0-9]*/game.gameSpyPort ${QUERY_PORT}/" "$SM_CON"

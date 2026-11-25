@@ -500,16 +500,19 @@ security_audit() {
         if ufw status | grep -q "Status: active"; then
             echo -e "  ${GREEN}✓${NC} UFW firewall is active"
             
-            # Check if ports are properly restricted
-            # grep -c prints the count even when it is 0 (with exit status 1),
-            # so no "|| echo 0" fallback - that would append a second line
-            # and break the numeric test below.
-            local mgmt_ports_open=$(ufw status | grep -c "14[67][0-9][0-9].*ALLOW.*Anywhere" || true)
-            if [ "$mgmt_ports_open" -gt 0 ]; then
-                echo -e "  ${YELLOW}⚠${NC} Management ports may be open to the world"
-                echo "    Consider restricting to trusted IPs only"
-                warnings=$((warnings + 1))
-            fi
+            # Check each instance's real management port. A port-range regex
+            # also matched game ports (14568-14666) and gave false warnings.
+            local ufw_rules name game_port query_port mgmt_port
+            ufw_rules=$(ufw status 2>/dev/null || true)
+            for name in $(get_instance_names); do
+                [ -f "/etc/systemd/system/bfsmd-${name}.service" ] || continue
+                read -r game_port query_port mgmt_port <<< "$(get_ports "$name")"
+                if grep -Eq "^${mgmt_port}(/tcp)?[[:space:]].*ALLOW[[:space:]]+(IN[[:space:]]+)?Anywhere" <<< "$ufw_rules"; then
+                    echo -e "  ${YELLOW}⚠${NC} $name - Management port ${mgmt_port}/tcp open to the world"
+                    echo "    Consider restricting to trusted IPs or using an SSH tunnel"
+                    warnings=$((warnings + 1))
+                fi
+            done
         else
             echo -e "  ${YELLOW}⚠${NC} UFW firewall is not active"
             warnings=$((warnings + 1))

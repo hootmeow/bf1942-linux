@@ -629,7 +629,7 @@ echo -e "${C_ARMY}   ━━━━━━━━━━━━━━━━━━━�
 echo -e "   ${YELLOW}★${NC} ${BOLD}BATTLEFIELD 1942 · DEDICATED SERVER${NC} ${YELLOW}★${NC}  ${C_STEEL}[Arch Linux]${NC}"
 echo -e "   ${DIM}enhanced multi-instance setup — safe · isolated · optimized${NC}"
 echo -e "${C_ARMY}   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "   ${DIM}by${NC} ${BOLD}OWLCAT${NC}  ${DIM}·${NC}  ${CYAN}github.com/hootmeow/bf1942-linux${NC}  ${DIM}·${NC}  ${C_KHAKI}www.bf1942.online${NC}"
+echo -e "   ${DIM}by${NC} ${BOLD}OWLCAT${NC}  ${DIM}·${NC}  ${CYAN}github.com/hootmeow/bf1942-linux${NC}  ${DIM}·${NC}  ${C_KHAKI}captheflag.com${NC}"
 echo ""
 
 # ------------------------------------------------------------
@@ -1385,6 +1385,7 @@ fi
 hr
 echo ""
 echo "For support: https://github.com/hootmeow/bf1942-linux"
+echo "Community:   https://captheflag.com"
 echo ""
 echo -e "${C_SAND}${BOLD}Happy gaming!${NC} 🎮"
 echo ""

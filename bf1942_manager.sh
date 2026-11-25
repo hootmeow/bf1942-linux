@@ -916,7 +916,10 @@ ${BOLD}Notes:${NC}
   - Commands that modify services require sudo
   - Use 'default' for standalone server instance
   - Instance names are case-sensitive
-  - Run 'security' regularly to check for issues"
+  - Run 'security' regularly to check for issues
+
+Docs & issues: https://github.com/hootmeow/bf1942-linux
+Community:     https://captheflag.com"
 }
 
 # Main command handler

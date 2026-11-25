@@ -462,7 +462,8 @@ sudo ./patches/apply_patches.sh <name>       # patch one instance
 ## 📚 Additional Resources
 
 - **firewall_guide.md** — detailed firewall configuration reference
-- **bf1942.online** — community resources and server downloads
+- **captheflag.com** — community site: server browser, stats, and leaderboards
+- **files.bf1942.online** — server and BFRM downloads
 
 ---
 
@@ -470,7 +471,7 @@ sudo ./patches/apply_patches.sh <name>       # patch one instance
 
 **OWLCAT**  
 🔗 https://github.com/hootmeow  
-🌐 https://www.bf1942.online
+🌐 https://captheflag.com
 
 ---
 
@@ -493,7 +494,7 @@ All Battlefield 1942 game assets remain © Electronic Arts Inc.
 ## 🆘 Support
 
 **Issues:** https://github.com/hootmeow/bf1942-linux/issues  
-**Community:** www.bf1942.online
+**Community:** https://captheflag.com
 
 ---
 

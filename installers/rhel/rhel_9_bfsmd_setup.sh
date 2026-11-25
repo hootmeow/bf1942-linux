@@ -10,7 +10,7 @@
 #    Unattended:  sudo ./rhel_9_bfsmd_setup.sh <instance_name> --yes [options]
 #    All options: sudo ./rhel_9_bfsmd_setup.sh --help
 #
-#  Author: OWLCAT (https://github.com/hootmeow / www.bf1942.online)
+#  Author: OWLCAT (https://github.com/hootmeow / https://captheflag.com)
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
@@ -680,7 +680,7 @@ echo -e "${C_ARMY}   ━━━━━━━━━━━━━━━━━━━�
 echo -e "   ${YELLOW}★${NC} ${BOLD}BATTLEFIELD 1942 · DEDICATED SERVER${NC} ${YELLOW}★${NC}  ${C_STEEL}[RHEL 9]${NC}"
 echo -e "   ${DIM}enhanced multi-instance setup — smart · secure · optimized${NC}"
 echo -e "${C_ARMY}   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "   ${DIM}by${NC} ${BOLD}OWLCAT${NC}  ${DIM}·${NC}  ${CYAN}github.com/hootmeow/bf1942-linux${NC}  ${DIM}·${NC}  ${C_KHAKI}www.bf1942.online${NC}"
+echo -e "   ${DIM}by${NC} ${BOLD}OWLCAT${NC}  ${DIM}·${NC}  ${CYAN}github.com/hootmeow/bf1942-linux${NC}  ${DIM}·${NC}  ${C_KHAKI}captheflag.com${NC}"
 echo ""
 
 # ------------------------------------------------------------
@@ -1541,6 +1541,7 @@ fi
 hr
 echo ""
 echo "For support: https://github.com/hootmeow/bf1942-linux"
+echo "Community:   https://captheflag.com"
 echo ""
 echo -e "${C_SAND}${BOLD}Happy gaming!${NC} 🎮"
 echo ""

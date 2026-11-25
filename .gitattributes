@@ -1,0 +1,4 @@
+# Scripts run on Linux; keep LF even on Windows checkouts (CRLF breaks bash).
+*.sh   text eol=lf
+*.py   text eol=lf
+*.png  binary

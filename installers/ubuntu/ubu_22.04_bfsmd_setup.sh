@@ -123,9 +123,9 @@ log_step() {
 detect_ip_addresses() {
     local local_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
     echo "Detecting public IP address..." >&2
-    local public_ip=$(timeout 5 curl -s https://api.ipify.org 2>/dev/null || \
-                      timeout 5 curl -s https://ifconfig.me 2>/dev/null || \
-                      timeout 5 curl -s https://icanhazip.com 2>/dev/null || echo "")
+    local public_ip=$(timeout 5 curl -4 -fsS https://api.ipify.org 2>/dev/null || \
+                      timeout 5 curl -4 -fsS https://ifconfig.me 2>/dev/null || \
+                      timeout 5 curl -4 -fsS https://icanhazip.com 2>/dev/null || echo "")
     echo "${local_ip}|${public_ip}"
 }
 

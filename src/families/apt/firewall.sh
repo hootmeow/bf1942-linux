@@ -10,28 +10,7 @@ else
         ufw allow ${GAME_PORT}/udp comment "BF1942 ${INSTANCE_NAME} Game"
         ufw allow ${QUERY_PORT}/udp comment "BF1942 ${INSTANCE_NAME} Query"
 
-        if [ "$FIREWALL_MODE" = "ask" ]; then
-            echo ""
-            echo "Management Port Security:"
-            echo "  1) Open to all IPs (easier, less secure)"
-            echo "  2) Restrict to specific IP (more secure)"
-            echo "  3) Skip (use SSH tunnel instead - most secure)"
-            read -r -p "Choice [1-3, default: 1]: " mgmt_choice
-
-            case "$mgmt_choice" in
-                2)
-                    read -r -p "Enter trusted IP address: " trusted_ip
-                    if validate_ip "$trusted_ip"; then
-                        FIREWALL_MODE="restrict=${trusted_ip}"
-                    else
-                        log_warn "Invalid IP, opening to all"
-                        FIREWALL_MODE="open"
-                    fi
-                    ;;
-                3) FIREWALL_MODE="tunnel" ;;
-                *) FIREWALL_MODE="open" ;;
-            esac
-        fi
+        choose_mgmt_access
 
         case "$FIREWALL_MODE" in
             restrict=*)

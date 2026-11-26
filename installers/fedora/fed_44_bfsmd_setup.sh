@@ -740,6 +740,34 @@ allow_existing_server_ports() {
 # ARGUMENT PARSING
 # ------------------------------------------------------------
 
+# Interactive firewall setup: ask who may reach the BFSMD management port.
+# Turns FIREWALL_MODE "ask" into open / tunnel / restrict=ADDR.
+choose_mgmt_access() {
+    local mgmt_choice trusted
+    if [ "$FIREWALL_MODE" != "ask" ]; then
+        return 0
+    fi
+    echo ""
+    echo "Management Port Security:"
+    echo "  1) Open to all IPs (easier, less secure)"
+    echo "  2) Restrict to specific IP (more secure)"
+    echo "  3) Skip (use SSH tunnel instead - most secure)"
+    read -r -p "Choice [1-3, default: 1]: " mgmt_choice || true
+    case "$mgmt_choice" in
+        2)
+            read -r -p "Enter trusted IP address: " trusted || true
+            if validate_ip "$trusted"; then
+                FIREWALL_MODE="restrict=${trusted}"
+            else
+                log_warn "Invalid IP, opening to all"
+                FIREWALL_MODE="open"
+            fi
+            ;;
+        3) FIREWALL_MODE="tunnel" ;;
+        *) FIREWALL_MODE="open" ;;
+    esac
+}
+
 print_fw_open_commands() {
     local fw_port
     for fw_port in $FW_PORTS; do
@@ -1925,28 +1953,7 @@ else
         firewall-cmd --permanent --add-port=${GAME_PORT}/udp
         firewall-cmd --permanent --add-port=${QUERY_PORT}/udp
 
-        if [ "$FIREWALL_MODE" = "ask" ]; then
-            echo ""
-            echo "Management Port Security:"
-            echo "  1) Open to all IPs (easier, less secure)"
-            echo "  2) Restrict to specific IP (more secure)"
-            echo "  3) Skip (use SSH tunnel instead - most secure)"
-            read -r -p "Choice [1-3, default: 1]: " mgmt_choice
-
-            case "$mgmt_choice" in
-                2)
-                    read -r -p "Enter trusted IP address: " trusted_ip
-                    if validate_ip "$trusted_ip"; then
-                        FIREWALL_MODE="restrict=${trusted_ip}"
-                    else
-                        log_warn "Invalid IP, opening to all"
-                        FIREWALL_MODE="open"
-                    fi
-                    ;;
-                3) FIREWALL_MODE="tunnel" ;;
-                *) FIREWALL_MODE="open" ;;
-            esac
-        fi
+        choose_mgmt_access
 
         case "$FIREWALL_MODE" in
             restrict=*)

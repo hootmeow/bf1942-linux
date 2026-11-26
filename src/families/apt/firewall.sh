@@ -59,5 +59,6 @@ else
     fi
     ufw --force enable
     ufw reload
+    FW_APPLIED="ufw"
     log_success "Firewall configured"
 fi

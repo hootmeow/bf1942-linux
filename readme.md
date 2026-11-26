@@ -73,11 +73,14 @@ The script is interactive by default. It will walk you through:
 
 1. **Installation mode** — choose Standalone (no remote management) or BFSMD (full GUI management via BFRM)
 2. **Instance name** *(BFSMD only)* — a unique name like `server1`, `conquest`, `tdm`
-3. **IP address** — auto-detected; choose local, public, or enter custom
-4. **BFSMD version** *(BFSMD only)* — v2.0 (recommended) or v2.01 (fixes admin/PunkBuster bugs)
-5. **Firewall rules** — rules are created for the ports this instance was assigned (see [Ports](#️-ports--configuration)). If ufw/firewalld is **already active** (e.g. enabled by an earlier install), opening them is the default, since the new server would otherwise be unreachable; if you decline, the exact commands to open them are printed.
+3. **Server name** — what players see in the server browser (default `BF1942 <instance>`, max 32 characters)
+4. **IP address** — auto-detected; choose local, public, or enter custom
+5. **BFSMD version** *(BFSMD only)* — v2.0 (recommended) or v2.01 (fixes admin/PunkBuster bugs)
+6. **Firewall rules** — rules are created for the ports this instance was assigned (see [Ports](#️-ports--configuration)). If ufw/firewalld is **already active** (e.g. enabled by an earlier install), opening them is the default, since the new server would otherwise be unreachable; if you decline, the exact commands to open them are printed.
 
-The final summary lists every port the instance uses and which ones players need. The generated sudoers rules are checked with `visudo -c` before being installed, so a bad file can never lock you out of `sudo`.
+Package installs run quietly behind a one-line spinner; their full output goes to `/var/log/bf1942-install.log` (pass `--verbose` to see it live). If a step fails, its last 20 lines are shown.
+
+After starting the service the installer **waits up to 90 seconds for the game server to answer a real query**, so "done" means players can actually join. The final screen then shows everything on one page: where players connect (including the public address and what to forward when the server sits behind NAT), the BFRM address/tunnel command and login, the remote-console password, what the firewall step did, all ports, and next steps. The installer exits non-zero if the service isn't running. The generated sudoers rules are checked with `visudo -c` before being installed, so a bad file can never lock you out of `sudo`.
 
 The `bf1942_user` service account is created without a password (login locked) unless you opt in when asked — a password isn't needed to run the server, and admins can always get a shell with `sudo su - bf1942_user`.
 
@@ -97,9 +100,23 @@ sudo ./<your-setup-script>.sh --yes --mode standalone
 | `--ip` | `local`, `public`, literal address | `local` |
 | `--version` | `2.0`, `2.01` | `2.0` |
 | `--firewall` | `skip`, `open`, `tunnel`, `restrict=ADDR` | `skip`, or `tunnel` (game ports opened, management closed) when ufw/firewalld is already active |
+| `--name` | server-browser name, max 32 chars, no quotes/backslashes | `BF1942 <instance>` (standalone keeps the shipped name) |
+| `--repair` / `--reinstall` | flag | `--repair` when the instance already exists (see below) |
+| `--verbose`, `-v` | flag | Off; package output only goes to the install log |
 | `--allow-unverified-downloads` | flag | Off; supply it to continue after a hash warning |
 
 Run any installer with `--help` for the full reference. The flags also work without `--yes` to pre-answer individual prompts in an otherwise interactive run.
+
+### Repairing or Reinstalling an Existing Server
+
+Running the installer again with an existing instance name (or `--mode standalone` when the standalone server exists) offers:
+
+- **Repair** *(default)* — keeps the server files, maps, settings, BFRM accounts and a changed remote-console password; rewrites the systemd unit, sudo rules and firewall rules, re-applies the instance's assigned ports, and restarts it. The bind IP is kept unless you pass `--ip`. Edited `.con` files are copied to `*.pre-repair` first.
+- **Reinstall** — downloads fresh server files over the old ones; the current settings folder is kept as `mods/bf1942/settings.pre-reinstall-<date>`.
+
+```bash
+sudo ./<your-setup-script>.sh server1 --repair --yes
+```
 
 ### 3️⃣ Add More Instances *(BFSMD Only)*
 

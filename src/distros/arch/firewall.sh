@@ -45,6 +45,7 @@ elif command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status:
         esac
     fi
     ufw reload
+    FW_APPLIED="ufw"
     log_success "UFW firewall updated."
 elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null | grep -q running; then
     log_info "Configuring firewalld..."
@@ -70,6 +71,7 @@ elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null
         esac
     fi
     firewall-cmd --reload
+    FW_APPLIED="firewalld"
     log_success "firewalld updated."
 else
     log_info "No active UFW or firewalld detected; skipping firewall rules."

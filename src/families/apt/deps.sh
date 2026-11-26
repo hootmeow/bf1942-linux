@@ -2,7 +2,7 @@ if [ ! -f "/etc/bf1942_deps_installed" ]; then
     log_info "First-time setup: Installing i386 architecture and libraries..."
 
     dpkg --add-architecture i386
-    apt-get update -y
+    run_quiet "Updating package lists" apt-get update -y
 
     # Ubuntu 24.04+ and Debian 13+ renamed libcurl4 to libcurl4t64 (64-bit
     # time_t ABI transition); older releases keep the original name.
@@ -13,8 +13,8 @@ if [ ! -f "/etc/bf1942_deps_installed" ]; then
     fi
     log_info "Using libcurl package: ${LIBCURL_PKG}"
 
-    log_info "Installing modern 32-bit libraries..."
-    apt-get install -y --no-install-recommends \
+    run_quiet "Installing 32-bit libraries" \
+        env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         libc6:i386 libstdc++6:i386 libgcc-s1:i386 \
         zlib1g:i386 "${LIBCURL_PKG}" libxext6:i386 \
         libx11-6:i386 libncurses6:i386 wget tar curl net-tools ufw
@@ -27,7 +27,7 @@ if [ ! -f "/etc/bf1942_deps_installed" ]; then
     fetch_legacy_deb "pool/main/n/ncurses/libncurses5_6.2+20201114-2+deb11u2_i386.deb" "$LIBNCURSES5_SHA"
     fetch_legacy_deb "pool/main/g/gcc-3.3/libstdc++5_3.3.6-34_i386.deb" "$LIBSTDC5_SHA"
 
-    dpkg -i libtinfo5*.deb libncurses5*.deb libstdc++5*.deb || true
+    run_quiet "Installing legacy libraries" dpkg -i libtinfo5*.deb libncurses5*.deb libstdc++5*.deb || true
     ldconfig
 
     popd > /dev/null

@@ -60,5 +60,6 @@ else
     fi
 
     firewall-cmd --reload
+    FW_APPLIED="firewalld"
     log_success "Firewall configured"
 fi

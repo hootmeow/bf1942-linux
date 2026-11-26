@@ -6,8 +6,7 @@ for pkg in lib32-glibc lib32-gcc-libs lib32-ncurses wget curl tar; do
 done
 
 if [ ${#ARCH_PKGS[@]} -gt 0 ]; then
-    log_info "Installing missing dependencies: ${ARCH_PKGS[*]}..."
-    pacman -S --needed --noconfirm "${ARCH_PKGS[@]}"
+    run_quiet "Installing ${ARCH_PKGS[*]}" pacman -S --needed --noconfirm "${ARCH_PKGS[@]}"
 else
     log_success "All required multilib packages are already installed."
 fi

@@ -10,8 +10,7 @@ if [ ! -f "/etc/bf1942_deps_installed" ]; then
     fi
     log_info "Using zlib package: ${ZLIB_PKG}"
 
-    log_info "Installing modern 32-bit libraries..."
-    dnf install -y \
+    run_quiet "Installing 32-bit libraries" dnf install -y \
         glibc.i686 libstdc++.i686 libgcc.i686 \
         "${ZLIB_PKG}" libcurl.i686 libX11.i686 \
         libXext.i686 ncurses-libs.i686 \

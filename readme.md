@@ -7,6 +7,7 @@ Automated setup for running **Battlefield 1942 Dedicated Servers** on modern 64-
 ## 🧩 Overview
 
 - **Single-script setup** — one script handles everything: standalone or BFSMD managed mode
+- **Download only what you need** — `install.sh` detects your distro and fetches just that installer
 - **Multi-instance support** — run multiple servers on one machine with automatic port allocation
 - **Smart configuration** — interactive IP detection, port conflict prevention, resource validation
 - **Performance optimized** — CPU affinity, memory limits, and I/O tuning per instance
@@ -37,7 +38,19 @@ Fedora has no LTS release; the RHEL 9 installer is the longer-support option.
 
 > **Prerequisite:** A user with **sudo** privileges
 
-### 1️⃣ Download
+### 1️⃣ Download & Run (auto-detect)
+
+The launcher detects your distro and downloads **only** the matching installer plus `bf1942_manager.sh` into the current directory — nothing else from the repo:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/hootmeow/bf1942-linux/main/install.sh
+sudo bash install.sh                 # interactive
+sudo bash install.sh server1 --yes   # any installer arguments are passed straight through
+```
+
+It picks the installer from `/etc/os-release` (derivatives such as Rocky/Alma, Linux Mint or EndeavourOS map to their parent distro). The downloaded installer stays in the current directory, so later runs (`sudo ./<script>.sh server2`) don't need the launcher. Set `BF1942_LINUX_REF=<tag or commit>` to pin a specific version.
+
+### 1️⃣ *(alternative)* Download Manually
 
 Pick your distro's script from the table above, then download it along with the management tool:
 
@@ -53,7 +66,7 @@ Replace `ubu_24.0.3_bfsmd_setup.sh` with your distro's script name from the tabl
 ### 2️⃣ Run the Installer
 
 ```bash
-sudo ./<your-setup-script>.sh
+sudo ./<your-setup-script>.sh        # or: sudo bash install.sh
 ```
 
 The script is interactive by default. It will walk you through:
@@ -62,7 +75,9 @@ The script is interactive by default. It will walk you through:
 2. **Instance name** *(BFSMD only)* — a unique name like `server1`, `conquest`, `tdm`
 3. **IP address** — auto-detected; choose local, public, or enter custom
 4. **BFSMD version** *(BFSMD only)* — v2.0 (recommended) or v2.01 (fixes admin/PunkBuster bugs)
-5. **Firewall rules** — optional, interactive security level selection
+5. **Firewall rules** — rules are created for the ports this instance was assigned (see [Ports](#️-ports--configuration)). If ufw/firewalld is **already active** (e.g. enabled by an earlier install), opening them is the default, since the new server would otherwise be unreachable; if you decline, the exact commands to open them are printed.
+
+The final summary lists every port the instance uses and which ones players need. The generated sudoers rules are checked with `visudo -c` before being installed, so a bad file can never lock you out of `sudo`.
 
 The `bf1942_user` service account is created without a password (login locked) unless you opt in when asked — a password isn't needed to run the server, and admins can always get a shell with `sudo su - bf1942_user`.
 
@@ -81,7 +96,7 @@ sudo ./<your-setup-script>.sh --yes --mode standalone
 | `--mode` | `standalone`, `bfsmd` | `bfsmd` when an instance name is given |
 | `--ip` | `local`, `public`, literal address | `local` |
 | `--version` | `2.0`, `2.01` | `2.0` |
-| `--firewall` | `skip`, `open`, `tunnel`, `restrict=ADDR` | `skip` |
+| `--firewall` | `skip`, `open`, `tunnel`, `restrict=ADDR` | `skip`, or `tunnel` (game ports opened, management closed) when ufw/firewalld is already active |
 | `--allow-unverified-downloads` | flag | Off; supply it to continue after a hash warning |
 
 Run any installer with `--help` for the full reference. The flags also work without `--yes` to pre-answer individual prompts in an otherwise interactive run.
@@ -99,8 +114,8 @@ Each instance automatically gets unique ports, its own systemd service, and dedi
 
 | Distro | Key Differences |
 |--------|----------------|
-| Ubuntu 24.04 | Uses `libcurl4t64:i386` (auto-detected) |
-| Ubuntu 22.04 | Uses `libcurl4:i386` |
+| Arch Linux | Needs `[multilib]` enabled; uses the static server binary with a local ncurses shim (no legacy packages) |
+| Ubuntu 22.04 / 24.04 | Auto-detects `libcurl4` vs `libcurl4t64:i386` at runtime |
 | Debian 12/13 | Auto-detects `libcurl4` vs `libcurl4t64` at runtime |
 | Fedora 44 | `dnf` + `.i686` packages, firewalld, SELinux (`restorecon`), zlib-ng auto-detection |
 | RHEL 9 | Same as Fedora + automatically enables EPEL and CRB repos |
@@ -156,10 +171,10 @@ The installer also saves a per-instance summary to `/root/.bf1942_credentials_<n
 
 ```bash
 ./bf1942_manager.sh list                  # All instances and their status
-./bf1942_manager.sh ports                 # Port assignments for all instances
-./bf1942_manager.sh status server1        # Detailed status of one instance
+./bf1942_manager.sh ports                 # All six ports of every instance
+./bf1942_manager.sh status server1        # Service status, ports, and live server info (map, players)
 ./bf1942_manager.sh config server1        # Show config file paths
-./bf1942_manager.sh health                # Health check all instances
+./bf1942_manager.sh health                # Queries each game server - not just "is systemd running"
 ./bf1942_manager.sh security              # Security audit (passwords, ownership, firewall)
 ./bf1942_manager.sh logs server1          # Live log tail (Ctrl+C to exit)
 
@@ -169,8 +184,11 @@ sudo ./bf1942_manager.sh restart server1
 sudo ./bf1942_manager.sh start-all
 sudo ./bf1942_manager.sh stop-all
 sudo ./bf1942_manager.sh backup server1   # Full backup incl. systemd unit + sudoers
+sudo ./bf1942_manager.sh restore <file>   # Rebuild an instance from a backup (here or on a new machine)
 sudo ./bf1942_manager.sh remove server2   # Removes instance + its firewall rules (asks for confirmation)
 ```
+
+**Health check:** `health` and `status` send a GameSpy `\status\` query to each instance's query port. A running systemd unit only proves BFSMD is up — the game server it launches can still be crashed, stuck loading, or refusing to start — so an instance only counts as healthy when the game itself answers (and you see its map and player count).
 
 ### Direct Systemd Commands
 
@@ -192,17 +210,19 @@ journalctl -u bfsmd-server1.service -f
 
 Each instance gets a unique ID (1–99), derived from its name. IDs are recorded in `/etc/bf1942_instances.conf`; if a new name would produce an ID that is already taken, the next free ID is used automatically, so two instances can never be assigned the same ports (ID 0 is reserved — it belongs to the standalone server's default ports).
 
-| Port | Formula | Example (`server1`) |
-|------|---------|---------------------|
-| Game (UDP) | 14567 + ID | 14600 |
-| Query (UDP) | 23000 + ID | 23033 |
-| Management (TCP) | 14667 + ID | 14700 |
-| GameSpy LAN (UDP) | 22000 + ID | 22033 |
-| ASE (UDP) | 14690 + ID | 14723 |
-| Remote console (TCP) | 4711 + ID | 4744 |
+| Port | Formula | Example (`server1`) | Open in firewall? |
+|------|---------|---------------------|-------------------|
+| Game (UDP) | 14567 + ID | 14600 | **Yes** — players connect here |
+| Query (UDP) | 23000 + ID | 23033 | **Yes** — server browsers / master list |
+| Management (TCP) | 14667 + ID | 14700 | Admins only — restrict to your IP or SSH-tunnel |
+| Remote console (TCP) | 4711 + ID | 4744 | No — SSH-tunnel if needed |
+| GameSpy LAN (UDP) | 22000 + ID | 22033 | No — LAN discovery only |
+| ASE (UDP) | 14690 + ID | 14723 | No — ASE master service is defunct |
+
+The installer's firewall step opens exactly these per-instance ports (game + query, plus management according to the option you choose). The standalone server uses the stock ports (ID 0): 14567, 23000, 22000, 14690.
 
 ```bash
-./bf1942_manager.sh ports   # See all current assignments
+./bf1942_manager.sh ports   # See all current assignments, all six ports
 ```
 
 ### Configuration Files
@@ -383,7 +403,18 @@ The manager creates a full backup — the instance directory plus a `<name>.meta
 ```bash
 sudo ./bf1942_manager.sh backup server1
 # → /root/bf1942_backups/bf1942_server1_backup_<timestamp>.tar.gz
+
+sudo ./bf1942_manager.sh restore /root/bf1942_backups/bf1942_server1_backup_<timestamp>.tar.gz
 ```
+
+`restore` puts back the instance files, systemd unit, sudoers rules (validated with `visudo`) and the registry entry, so the instance keeps its original ID and ports. It:
+
+- refuses to overwrite an existing instance — `backup` and `remove` it first if you're rolling back
+- refuses if another instance already holds the same ID (they would share ports)
+- on a new machine, needs the installer to have run once (32-bit libraries + `bf1942_user`), and warns if the service is bound to an IP that machine doesn't have
+- offers to open the game ports if a firewall is active, then asks whether to start the server
+
+Backups made before restore support (no `<name>.meta/` folder) can't be restored automatically; the command prints the manual `tar` step instead.
 
 For a quick settings-only snapshot:
 ```bash
@@ -408,8 +439,9 @@ sudo cp -r /home/bf1942_user/instances/server1/mods/bf1942/settings/* \
 
 ```
 bf1942-linux/
+├── install.sh                 # Launcher: detects the distro, fetches only its installer
 ├── bf1942_manager.sh          # Shared management tool (all distros)
-├── installers/
+├── installers/                # GENERATED from src/ - one self-contained script per distro
 │   ├── arch/
 │   │   └── arch_bfsmd_setup.sh
 │   ├── ubuntu/
@@ -423,11 +455,18 @@ bf1942-linux/
 │   │   └── rhel_9_bfsmd_setup.sh
 │   └── centos/
 │       └── centos_stream9_bfsmd_setup.sh
+├── src/                       # Installer source (edit here, then run src/build.sh)
+│   ├── build.sh                    # Assembles installers/ from the pieces below
+│   ├── installer.sh.in             # Shared installer template
+│   ├── common/                     # Default fragments
+│   ├── families/{apt,dnf,el}/      # Fragments shared by a distro family
+│   └── distros/<distro>/           # distro.conf + distro-only fragments (header, deps, ...)
 ├── patches/
-│   ├── apply_patches.sh            # Stop → patch → restart wrapper for the .py patches
-│   ├── patch-existing-logging.sh   # Enable XML event logging on existing installs
-│   ├── patch_ctf_respawn.py        # Binary patch: CTF respawn bug (both lnxded binaries)
-│   └── patch_ctf_flags_map.py      # Binary patch: CTF flags on map-vote screen
+│   ├── apply_patches.sh            # Runner: checks + applies every patch below, per instance
+│   ├── patch_ctf_flags_map.py      # Binary patch: dropped CTF flags land on objects, not through them
+│   ├── patch_ctf_respawn.py        # Binary patch: CTF flag respawn timer resets on pickup
+│   ├── patch-existing-logging.sh   # Config patch: enable XML event logging on existing installs
+│   └── install-replay-recorder.sh  # Optional add-on: bfstats.io replay recorder (run separately)
 ├── firewall_guide.md
 ├── LICENSE
 └── readme.md
@@ -437,15 +476,31 @@ bf1942-linux/
 
 ## 🛠️ Applying Patches
 
-The `patches/` folder contains scripts that fix known server bugs — including `patch-existing-logging.sh` for enabling XML event logging on servers installed before it became the default (see [XML Event Logging](#-xml-event-logging)). See each patch file for details.
-
-The binary patches (`patch_*.py`) are applied with the wrapper, which stops the service, patches both server binaries, and restarts:
+The `patches/` folder holds fixes for known server bugs. `apply_patches.sh` applies **all of them** in one go — you don't need to run each script by hand:
 
 ```bash
-sudo ./patches/apply_patches.sh              # list instances and patches
-sudo ./patches/apply_patches.sh all          # patch every instance
-sudo ./patches/apply_patches.sh <name>       # patch one instance
+sudo ./patches/apply_patches.sh                   # overview: every instance x every patch (needed / applied)
+sudo ./patches/apply_patches.sh all               # apply whatever is needed, on every instance
+sudo ./patches/apply_patches.sh server1 server2   # specific instances ('standalone' = standalone server)
+sudo ./patches/apply_patches.sh all --check       # report only, change nothing
+sudo ./patches/apply_patches.sh all --only patch_ctf_respawn
 ```
+
+| Patch | Type | What it fixes |
+|-------|------|---------------|
+| `patch_ctf_flags_map` | binary | A dropped CTF flag falls through buildings/bridges to the terrain; patched, it lands on the object (and stays above water) |
+| `patch_ctf_respawn` | binary | The flag's 30 s respawn countdown isn't reset when it's picked up again; patched, it resets on every pickup |
+| `patch-existing-logging` | config | Enables uncompressed XML event logging on installs made before it was the default ([details](#-xml-event-logging)) |
+
+For each instance the runner checks first and only touches instances that need something. Then it stops the service, backs up both server binaries (`bf1942_lnxded.*.orig` = the binary before the runner first patched it, plus a timestamped `*.pre-patch-<date>` copy every run), applies the patches, and starts the service again if it was running. Any new `patch_*.py` (binary) or `patch-*.sh` (config) file dropped into the folder is picked up automatically.
+
+**Safety & provenance**
+- The binary patches come from [uuuzbf/bf1942-patches](https://github.com/uuuzbf/bf1942-patches); offsets and bytes are identical to upstream.
+- They were verified against all three server archives the installers download: the original bytes match at every offset in both `.static` and `.dynamic`, only the documented byte ranges change, and re-running is a no-op.
+- Each patch verifies the original bytes before writing and refuses a binary it doesn't recognise (`[MISMATCH]`), so a different build is never corrupted.
+- To undo: stop the service and copy `bf1942_lnxded.<static|dynamic>.orig` back over the patched file. (If you had patched a binary by hand before ever using the runner, `.orig` holds that hand-patched copy.)
+
+> ⚠️ **Replay recorder:** the bfstats.io recorder (`install-replay-recorder.sh`) only hooks the *unmodified* `bf1942_lnxded.static`. The runner therefore **skips binary patches on instances that have the recorder installed** — pass `--with-recorder` to patch them anyway (recordings will stop working on those instances).
 
 ---
 
@@ -477,10 +532,13 @@ sudo ./patches/apply_patches.sh <name>       # patch one instance
 
 ## 🤝 Contributing
 
-1. Test changes on the relevant distribution(s)
-2. Update documentation
-3. Follow existing code style
-4. Submit a pull request
+1. **Installers are generated** — edit `src/`, never `installers/` directly:
+   - shared behaviour → `src/installer.sh.in` or `src/common/`
+   - a distro family (apt / dnf / EL) → `src/families/<family>/`
+   - one distro → `src/distros/<distro>/` (its `distro.conf` lists the fragment search order)
+2. Rebuild and verify: `./src/build.sh`, then `./src/build.sh --check` (fails if `installers/` is out of date)
+3. Test changes on the relevant distribution(s)
+4. Update documentation and submit a pull request (commit `src/` and the regenerated `installers/` together)
 
 ---
 

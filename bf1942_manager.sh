@@ -85,15 +85,19 @@ get_instance_id() {
 # Read ports from the instance's actual configuration (servermanager.con and
 # the systemd unit); fall back to ID-derived defaults for anything missing,
 # so manual port edits are reported truthfully.
+# Prints: game query mgmt lan ase console
 get_ports() {
     local name="$1"
     local con="${BF_BASE}/${name}/mods/bf1942/settings/servermanager.con"
     local unit="/etc/systemd/system/bfsmd-${name}.service"
-    local game="" query="" mgmt=""
+    local game="" query="" mgmt="" lan="" ase="" console=""
 
     if [ -f "$con" ]; then
-        game=$(awk '$1=="game.serverPort"{print $2; exit}' "$con" | tr -d '\r')
-        query=$(awk '$1=="game.gameSpyPort"{print $2; exit}' "$con" | tr -d '\r')
+        game=$(con_value "$con" game.serverPort)
+        query=$(con_value "$con" game.gameSpyPort)
+        lan=$(con_value "$con" game.gameSpyLANPort)
+        ase=$(con_value "$con" game.ASEPort)
+        console=$(con_value "$con" manager.consolePort)
     fi
     if [ -f "$unit" ]; then
         mgmt=$(sed -n 's/.*-port \([0-9]\{1,\}\).*/\1/p' "$unit" | head -1)
@@ -101,7 +105,48 @@ get_ports() {
 
     local id
     id=$(get_instance_id "$name")
-    echo "${game:-$((14567 + id))} ${query:-$((23000 + id))} ${mgmt:-$((14667 + id))}"
+    echo "${game:-$((14567 + id))} ${query:-$((23000 + id))} ${mgmt:-$((14667 + id))}" \
+         "${lan:-$((22000 + id))} ${ase:-$((14690 + id))} ${console:-$((4711 + id))}"
+}
+
+# First numeric value of a "key value" line in a .con file.
+con_value() {
+    awk -v k="$2" '$1==k && $2 ~ /^[0-9]+\r?$/ {sub(/\r$/, "", $2); print $2; exit}' "$1"
+}
+
+# IP the instance's BFSMD is bound to (the -ip flag in its unit).
+get_bind_ip() {
+    local unit="/etc/systemd/system/bfsmd-${1}.service" ip=""
+    if [ -f "$unit" ]; then
+        ip=$(sed -n 's/.*-ip \([0-9.]\{7,15\}\).*/\1/p' "$unit" | head -1)
+    fi
+    echo "${ip:-127.0.0.1}"
+}
+
+# Ask the game server itself for its status via the GameSpy query port.
+# Prints "hostname|map|players|maxplayers" and returns 0 when it answers.
+# A running systemd unit only proves BFSMD is up - the game server it
+# launches can still be crashed, stuck loading, or refusing to start.
+query_server() {
+    local ip="$1" port="$2" reply
+    reply=$(timeout 3 bash -c '
+        exec 3<>"/dev/udp/$1/$2" || exit 1
+        printf "\\status\\" >&3
+        # One datagram is enough: GameSpy sends the server info first.
+        dd bs=65535 count=1 status=none <&3
+    ' _ "$ip" "$port" 2>/dev/null | tr -d '\000') || true
+    [[ "$reply" == *'\hostname\'* ]] || return 1
+
+    local -A kv=()
+    local key val rest="${reply#\\}"
+    while [ -n "$rest" ]; do
+        key="${rest%%\\*}"; rest="${rest#*\\}"
+        [ "$rest" = "${key}" ] && break
+        val="${rest%%\\*}"
+        if [ "$rest" = "$val" ]; then rest=""; else rest="${rest#*\\}"; fi
+        kv["$key"]="$val"
+    done
+    echo "${kv[hostname]:-?}|${kv[mapname]:-?}|${kv[numplayers]:-?}|${kv[maxplayers]:-?}"
 }
 
 # Check if service file exists
@@ -155,6 +200,29 @@ get_instance_names() {
     echo "${names[@]:-}"
 }
 
+# Port block shared by status and config.
+print_instance_ports() {
+    echo "  Game Port      : $1 (UDP)  public - players connect here"
+    echo "  Query Port     : $2 (UDP)  public - server browsers"
+    echo "  Management Port: $3 (TCP)  BFRM admin - restrict or SSH-tunnel"
+    echo "  Remote Console : $6 (TCP)  admin only - keep closed"
+    echo "  GameSpy LAN    : $4 (UDP)  LAN discovery only"
+    echo "  ASE Port       : $5 (UDP)  legacy, not needed"
+}
+
+# One health line for a service that systemd reports as running.
+report_game_health() {
+    local label="$1" ip="$2" port="$3" reply
+    if reply=$(query_server "$ip" "$port"); then
+        IFS='|' read -r q_host q_map q_players q_max <<< "$reply"
+        echo -e "  ${GREEN}✓${NC} $label - Running, ${q_players}/${q_max} players on ${q_map}"
+        return 0
+    fi
+    echo -e "  ${YELLOW}⚠${NC} $label - Service up, but the game server is not answering on ${ip}:${port}/udp"
+    echo "      (still loading after a restart, crashed, or BFSMD could not start it - check BFRM / logs)"
+    return 1
+}
+
 # List all instances
 list_instances() {
     echo -e "${BOLD}BF1942 Server Instances${NC}"
@@ -188,7 +256,7 @@ list_instances() {
             local status_color="${RED}"
             [ "$status" == "active" ] && status_color="${GREEN}"
             
-            read game_port query_port mgmt_port <<< $(get_ports "$name")
+            read -r game_port query_port mgmt_port lan_port ase_port console_port <<< "$(get_ports "$name")"
             
             printf "  ${CYAN}%-20s${NC} ${status_color}%-10s${NC} (${enabled}) [Game:%-5s Query:%-5s Mgmt:%-5s]\n" \
                 "$name" "$status" "$game_port" "$query_port" "$mgmt_port"
@@ -202,7 +270,10 @@ list_instances() {
     if [ $found -eq 0 ]; then
         log_warn "No instances found."
         echo ""
-        echo "To create an instance, pick the script for your distro:"
+        echo "To create an instance (detects your distro automatically):"
+        echo "  sudo bash install.sh [instance_name]"
+        echo ""
+        echo "Or run the installer for your distro directly:"
         echo "  sudo ./installers/arch/arch_bfsmd_setup.sh         [instance_name]"
         echo "  sudo ./installers/ubuntu/ubu_24.0.3_bfsmd_setup.sh [instance_name]"
         echo "  sudo ./installers/ubuntu/ubu_22.04_bfsmd_setup.sh  [instance_name]"
@@ -219,23 +290,27 @@ list_instances() {
 show_ports() {
     echo -e "${BOLD}Port Assignments${NC}"
     echo ""
-    printf "%-20s %-15s %-15s %-15s\n" "Instance" "Game Port" "Query Port" "Mgmt Port"
-    printf "%-20s %-15s %-15s %-15s\n" "--------" "---------" "----------" "---------"
-    
+    local fmt="%-20s %-9s %-9s %-9s %-9s %-9s %-9s\n"
+    printf "$fmt" "Instance" "Game" "Query" "Mgmt" "Console" "LAN" "ASE"
+    printf "$fmt" "" "udp" "udp" "tcp" "tcp" "udp" "udp"
+    printf "$fmt" "--------" "----" "-----" "----" "-------" "---" "---"
+
     # Standalone
     if [ -d "$BF_STANDALONE" ] && service_exists "bf1942.service"; then
-        printf "%-20s %-15s %-15s %-15s\n" "default" "14567 (UDP)" "23000 (UDP)" "N/A"
+        printf "$fmt" "default" "14567" "23000" "-" "-" "22000" "14690"
     fi
-    
+
     # BFSMD instances
     local instance_names=($(get_instance_names))
     for name in "${instance_names[@]}"; do
         [ -z "$name" ] && continue
-        read game_port query_port mgmt_port <<< $(get_ports "$name")
-        printf "%-20s %-15s %-15s %-15s\n" \
-            "$name" "$game_port (UDP)" "$query_port (UDP)" "$mgmt_port (TCP)"
+        read -r game_port query_port mgmt_port lan_port ase_port console_port <<< "$(get_ports "$name")"
+        printf "$fmt" "$name" "$game_port" "$query_port" "$mgmt_port" "$console_port" "$lan_port" "$ase_port"
     done
-    
+
+    echo ""
+    echo "Players need Game + Query open. Mgmt (BFRM) and Console are admin-only:"
+    echo "restrict them to trusted IPs or use an SSH tunnel. LAN/ASE can stay closed."
     echo ""
 }
 
@@ -277,11 +352,17 @@ show_status() {
     systemctl status "$service" --no-pager -l
     echo ""
     
-    read game_port query_port mgmt_port <<< $(get_ports "$name")
+    read -r game_port query_port mgmt_port lan_port ase_port console_port <<< "$(get_ports "$name")"
     log_info "Port Configuration:"
-    echo "  Game Port      : $game_port (UDP)"
-    echo "  Query Port     : $query_port (UDP)"
-    echo "  Management Port: $mgmt_port (TCP)"
+    print_instance_ports "$game_port" "$query_port" "$mgmt_port" "$lan_port" "$ase_port" "$console_port"
+    echo ""
+    local reply
+    if reply=$(query_server "$(get_bind_ip "$name")" "$query_port"); then
+        IFS='|' read -r q_host q_map q_players q_max <<< "$reply"
+        log_success "Game server answering: \"${q_host}\" - ${q_map}, ${q_players}/${q_max} players"
+    elif systemctl is-active --quiet "$service"; then
+        log_warn "Game server not answering on query port ${query_port} (still loading, or crashed - see BFRM / logs)"
+    fi
     echo ""
     log_info "Configuration: ${BF_BASE}/${name}/mods/bf1942/settings/"
 }
@@ -316,11 +397,9 @@ show_config() {
     echo "Service File: /etc/systemd/system/bfsmd-${name}.service"
     echo ""
     
-    read game_port query_port mgmt_port <<< $(get_ports "$name")
+    read -r game_port query_port mgmt_port lan_port ase_port console_port <<< "$(get_ports "$name")"
     echo "Ports:"
-    echo "  Game:       $game_port (UDP)"
-    echo "  Query:      $query_port (UDP)"
-    echo "  Management: $mgmt_port (TCP)"
+    print_instance_ports "$game_port" "$query_port" "$mgmt_port" "$lan_port" "$ase_port" "$console_port"
     echo ""
     echo "Key Files:"
     echo "  - servermanager.con (BFSMD settings)"
@@ -343,8 +422,11 @@ health_check() {
     if [ -d "$BF_STANDALONE" ] && service_exists "bf1942.service"; then
         total=$((total + 1))
         if systemctl is-active --quiet bf1942.service; then
-            active=$((active + 1))
-            echo -e "  ${GREEN}✓${NC} default (standalone) - Running"
+            if report_game_health "default (standalone)" "127.0.0.1" 23000; then
+                active=$((active + 1))
+            else
+                issues=$((issues + 1))
+            fi
         else
             issues=$((issues + 1))
             echo -e "  ${RED}✗${NC} default (standalone) - Not running"
@@ -360,8 +442,13 @@ health_check() {
         if service_exists "$service"; then
             total=$((total + 1))
             if systemctl is-active --quiet "$service"; then
-                active=$((active + 1))
-                echo -e "  ${GREEN}✓${NC} $name - Running"
+                local query_port
+                query_port=$(get_ports "$name" | awk '{print $2}')
+                if report_game_health "$name" "$(get_bind_ip "$name")" "$query_port"; then
+                    active=$((active + 1))
+                else
+                    issues=$((issues + 1))
+                fi
             else
                 issues=$((issues + 1))
                 echo -e "  ${RED}✗${NC} $name - Not running"
@@ -370,7 +457,7 @@ health_check() {
     done
     
     echo ""
-    echo "Summary: $active/$total instances running"
+    echo "Summary: $active/$total game servers running and answering queries"
     
     if [ $issues -gt 0 ]; then
         log_warn "$issues instance(s) have issues"
@@ -502,11 +589,11 @@ security_audit() {
             
             # Check each instance's real management port. A port-range regex
             # also matched game ports (14568-14666) and gave false warnings.
-            local ufw_rules name game_port query_port mgmt_port
+            local ufw_rules name game_port query_port mgmt_port lan_port ase_port console_port
             ufw_rules=$(ufw status 2>/dev/null || true)
             for name in $(get_instance_names); do
                 [ -f "/etc/systemd/system/bfsmd-${name}.service" ] || continue
-                read -r game_port query_port mgmt_port <<< "$(get_ports "$name")"
+                read -r game_port query_port mgmt_port lan_port ase_port console_port <<< "$(get_ports "$name")"
                 if grep -Eq "^${mgmt_port}(/tcp)?[[:space:]].*ALLOW[[:space:]]+(IN[[:space:]]+)?Anywhere" <<< "$ufw_rules"; then
                     echo -e "  ${YELLOW}⚠${NC} $name - Management port ${mgmt_port}/tcp open to the world"
                     echo "    Consider restricting to trusted IPs or using an SSH tunnel"
@@ -682,8 +769,8 @@ remove_instance() {
 
     # Read the ports now - get_ports needs the config and unit files that
     # are deleted below.
-    local game_port query_port mgmt_port
-    read -r game_port query_port mgmt_port <<< "$(get_ports "$name")"
+    local game_port query_port mgmt_port lan_port ase_port console_port
+    read -r game_port query_port mgmt_port lan_port ase_port console_port <<< "$(get_ports "$name")"
 
     log_info "Stopping service..."
     systemctl stop "$service" 2>/dev/null || true
@@ -777,18 +864,189 @@ backup_instance() {
         local size=$(du -h "${backup_dir}/${backup_file}" | cut -f1)
         log_success "Backup created: ${backup_dir}/${backup_file} (${size})"
         echo ""
-        echo "To restore this backup:"
-        echo "  sudo tar -xzf ${backup_dir}/${backup_file} -C ${BF_BASE} ${name}"
-        echo "  sudo systemctl restart bfsmd-${name}.service"
-        echo ""
-        echo "The archive also contains ${name}.meta/ with the systemd unit,"
-        echo "sudoers file, and registry entry (append it to ${INSTANCE_REGISTRY})"
-        echo "for rebuilding the instance on a clean machine."
+        echo "To restore it (here or on another machine, after 'remove' if it still exists):"
+        echo "  sudo $0 restore ${backup_dir}/${backup_file}"
     else
         rm -rf "$meta_parent"
         log_error "Backup failed!"
         exit 1
     fi
+}
+
+# Restore an instance from a 'backup' archive: instance files, systemd unit,
+# sudoers rules and registry entry. Refuses to overwrite an existing instance.
+restore_instance() {
+    require_root
+    local archive="${1:-}"
+
+    if [ -z "$archive" ] || [ ! -f "$archive" ]; then
+        log_error "Backup file not found: ${archive:-<none>}"
+        echo "Usage: sudo $0 restore /root/bf1942_backups/bf1942_<name>_backup_<date>.tar.gz"
+        exit 1
+    fi
+
+    local entries
+    if ! entries=$(tar -tzf "$archive" 2>/dev/null); then
+        log_error "Not a readable .tar.gz archive: $archive"
+        exit 1
+    fi
+    entries=$(sed 's#^\./##' <<< "$entries")
+
+    # The archive holds exactly <name>/ and (since metadata support) <name>.meta/
+    local name
+    name=$(cut -d/ -f1 <<< "$entries" | grep -v '\.meta$' | sort -u || true)
+    if [ -z "$name" ] || [ "$(wc -l <<< "$name")" -ne 1 ]; then
+        log_error "Archive does not look like a bf1942_manager backup (expected one instance directory)."
+        exit 1
+    fi
+    if [ "$name" = "default" ] || ! validate_instance_name "$name"; then
+        log_error "Archive contains an unsupported instance name: '$name'"
+        exit 1
+    fi
+    if grep -qvE "^(${name}|${name}\.meta)(/|$)" <<< "$entries" ||
+        grep -qE '(^|/)\.\.(/|$)' <<< "$entries"; then
+        log_error "Archive contains paths outside ${name}/ - refusing to extract it."
+        exit 1
+    fi
+
+    local service="bfsmd-${name}.service"
+    local unit_path="/etc/systemd/system/${service}"
+    if [ -e "${BF_BASE}/${name}" ]; then
+        log_error "Instance '$name' already exists at ${BF_BASE}/${name}."
+        echo "  Back it up and remove it first:  sudo $0 backup $name && sudo $0 remove $name"
+        exit 1
+    fi
+    if ! id "$BF_USER" >/dev/null 2>&1; then
+        log_error "Service user '$BF_USER' does not exist on this machine."
+        echo "  Run the installer for your distro once first - it installs the 32-bit"
+        echo "  libraries and creates the user - then retry the restore."
+        exit 1
+    fi
+    if ! grep -qE "^${name}\.meta/${service}$" <<< "$entries" && [ ! -f "$unit_path" ]; then
+        log_error "This backup has no systemd unit (it predates restore support) and none exists here."
+        echo "  Extract the files manually and recreate the service with the installer:"
+        echo "  sudo tar -xzf $archive -C ${BF_BASE} ${name}"
+        exit 1
+    fi
+
+    local meta_tmp
+    meta_tmp=$(mktemp -d)
+    tar -xzf "$archive" -C "$meta_tmp" "${name}.meta" 2>/dev/null || true
+    local meta="${meta_tmp}/${name}.meta"
+
+    # Registry: keep the instance's original ID, unless another instance
+    # already holds it (they would share ports).
+    if ! grep -q "^${name}=" "$INSTANCE_REGISTRY" 2>/dev/null && [ -s "${meta}/registry_entry" ]; then
+        local entry id owner
+        entry=$(head -1 "${meta}/registry_entry")
+        id="${entry#*=}"
+        if ! [[ "$entry" =~ ^${name}=[0-9]+$ ]]; then
+            log_warn "Ignoring malformed registry entry in backup: $entry"
+        else
+            owner=$(awk -F= -v i="$id" '$2==i{print $1; exit}' "$INSTANCE_REGISTRY" 2>/dev/null || true)
+            if [ -n "$owner" ]; then
+                rm -rf "$meta_tmp"
+                log_error "Instance ID ${id} (and its ports) is already used by '${owner}'."
+                echo "  Remove or re-port '${owner}' first, or restore on another machine."
+                exit 1
+            fi
+        fi
+    fi
+
+    log_info "Restoring instance '$name' from $(basename "$archive")..."
+    mkdir -p "$BF_BASE"
+    chown "${BF_USER}:${BF_USER}" "$BF_BASE"
+    if ! tar -xzf "$archive" -C "$BF_BASE" "$name"; then
+        rm -rf "$meta_tmp" "${BF_BASE:?}/${name}"
+        log_error "Extraction failed."
+        exit 1
+    fi
+    chown -R "${BF_USER}:${BF_USER}" "${BF_BASE}/${name}"
+    log_success "Files restored to ${BF_BASE}/${name}"
+
+    if [ -n "${entry:-}" ] && [[ "$entry" =~ ^${name}=[0-9]+$ ]]; then
+        echo "$entry" >> "$INSTANCE_REGISTRY"
+        chmod 644 "$INSTANCE_REGISTRY"
+        log_success "Registry entry restored ($entry)"
+    fi
+
+    if [ -f "$unit_path" ]; then
+        log_info "Keeping the existing ${unit_path}"
+    else
+        install -m 644 -o root -g root "${meta}/${service}" "$unit_path"
+        log_success "Service unit restored"
+    fi
+
+    local sudoers_src="${meta}/bf1942_${name}" sudoers_dst="/etc/sudoers.d/bf1942_${name}"
+    if [ -f "$sudoers_src" ] && [ ! -f "$sudoers_dst" ]; then
+        if ! command -v visudo >/dev/null 2>&1 || visudo -cf "$sudoers_src" >/dev/null; then
+            install -m 440 -o root -g root "$sudoers_src" "$sudoers_dst"
+            log_success "Sudoers rules restored"
+        else
+            log_warn "Sudoers rules in the backup failed validation - skipped."
+        fi
+    fi
+    rm -rf "$meta_tmp"
+
+    if command -v restorecon >/dev/null 2>&1; then
+        restorecon -R "${BF_BASE}/${name}" 2>/dev/null || true
+    fi
+
+    # The unit binds BFSMD to a fixed IP - flag it when restoring elsewhere.
+    local bind_ip
+    bind_ip=$(get_bind_ip "$name")
+    if command -v ip >/dev/null 2>&1 && ! ip -4 addr show 2>/dev/null | grep -qF "inet ${bind_ip}/"; then
+        log_warn "The service binds to ${bind_ip}, which is not an address on this machine."
+        echo "  Edit '-ip ${bind_ip}' in ${unit_path}, then: sudo systemctl daemon-reload"
+    fi
+
+    systemctl daemon-reload
+    systemctl enable "$service" >/dev/null 2>&1 || true
+
+    local game_port query_port mgmt_port lan_port ase_port console_port
+    read -r game_port query_port mgmt_port lan_port ase_port console_port <<< "$(get_ports "$name")"
+    offer_open_game_ports "$name" "$game_port" "$query_port"
+
+    local start_now="y"
+    read -r -p "Start '$name' now? [Y/n] " start_now || true
+    if [[ ! "$start_now" =~ ^([nN][oO]|[nN])$ ]]; then
+        systemctl start "$service"
+        sleep 2
+        if systemctl is-active --quiet "$service"; then
+            log_success "Instance '$name' restored and running."
+        else
+            log_error "Service failed to start. Check: journalctl -u $service -n 50"
+        fi
+    else
+        log_success "Instance '$name' restored. Start it with: sudo $0 start $name"
+    fi
+}
+
+# Open an instance's player-facing ports in an active firewall, on request.
+offer_open_game_ports() {
+    local name="$1" game="$2" query="$3" answer=""
+    local fw=""
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+        fw="ufw"
+    elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+        fw="firewalld"
+    fi
+    [ -n "$fw" ] || return 0
+
+    read -r -p "Open game ports ${game}/udp and ${query}/udp in ${fw}? [Y/n] " answer || true
+    if [[ "$answer" =~ ^([nN][oO]|[nN])$ ]]; then
+        log_warn "Players cannot connect until ${game}/udp and ${query}/udp are open."
+        return 0
+    fi
+    if [ "$fw" = "ufw" ]; then
+        ufw allow "${game}/udp" comment "BF1942 ${name} Game" >/dev/null
+        ufw allow "${query}/udp" comment "BF1942 ${name} Query" >/dev/null
+    else
+        firewall-cmd --permanent --add-port="${game}/udp" >/dev/null
+        firewall-cmd --permanent --add-port="${query}/udp" >/dev/null
+        firewall-cmd --reload >/dev/null
+    fi
+    log_success "Opened ${game}/udp and ${query}/udp (management port left closed - use an SSH tunnel)"
 }
 
 # Start all instances
@@ -892,9 +1150,10 @@ ${BOLD}Commands:${NC}
   ${CYAN}ports${NC}             - Show port assignments for all instances
   ${CYAN}status${NC} [name]     - Show detailed status of instance(s)
   ${CYAN}config${NC} <n>        - Show configuration paths for instance
-  ${CYAN}health${NC}            - Check health of all instances
+  ${CYAN}health${NC}            - Check every instance's game server actually answers
   ${CYAN}security${NC}          - Run security audit on all instances
-  ${CYAN}backup${NC} <n>        - Create backup of instance configuration
+  ${CYAN}backup${NC} <n>        - Back up an instance (files, service, sudoers, registry)
+  ${CYAN}restore${NC} <file>    - Restore an instance from a backup archive
   ${CYAN}start${NC} <n>         - Start an instance
   ${CYAN}stop${NC} <n>          - Stop an instance
   ${CYAN}restart${NC} <n>       - Restart an instance
@@ -911,6 +1170,7 @@ ${BOLD}Examples:${NC}
   $0 health
   $0 security
   $0 backup server1
+  sudo $0 restore /root/bf1942_backups/bf1942_server1_backup_20261125_120000.tar.gz
   sudo $0 restart server1
   sudo $0 start-all
   sudo $0 remove server2
@@ -1009,6 +1269,9 @@ main() {
                 exit 1
             fi
             show_logs "$2"
+            ;;
+        restore)
+            restore_instance "${2:-}"
             ;;
         remove)
             if [ -z "${2:-}" ]; then

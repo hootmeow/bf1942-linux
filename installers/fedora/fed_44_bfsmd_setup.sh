@@ -62,6 +62,40 @@ accept_unverified_download() {
     return 0
 }
 
+# These exact builds rotate off the main mirror when Debian archives an
+# old release, so fall back to archive.debian.org before giving up.
+fetch_legacy_deb() {
+    local path="$1"
+    local expected="$2"
+    local file="${path##*/}"
+    local primary="${file}.primary" archive="${file}.archive" candidate=""
+
+    if wget -q -O "$primary" "https://deb.debian.org/debian/${path}"; then
+        if verify_sha256 "$expected" "$primary"; then
+            mv -f "$primary" "$file"
+            return 0
+        fi
+        candidate="$primary"
+    fi
+    log_warn "Verified ${file} unavailable on deb.debian.org; trying archive.debian.org..."
+    if wget -q -O "$archive" "https://archive.debian.org/debian/${path}"; then
+        if verify_sha256 "$expected" "$archive"; then
+            mv -f "$archive" "$file"
+            rm -f "$primary"
+            return 0
+        fi
+        [ -n "$candidate" ] || candidate="$archive"
+    fi
+    if [ -n "$candidate" ] && accept_unverified_download "$expected" "$candidate" "$file"; then
+        mv -f "$candidate" "$file"
+        rm -f "$primary" "$archive"
+        return 0
+    fi
+    rm -f "$primary" "$archive"
+    log_error "Could not download an accepted copy of ${file}."
+    return 1
+}
+
 # Configuration
 BF_USER="bf1942_user"
 BF_HOME="/home/${BF_USER}"
@@ -122,8 +156,20 @@ log_step() {
 # Note: Password generation removed - BFSMD uses proprietary hash format
 # that cannot be generated externally. Default credentials must be used.
 
+# First global IPv4 address; `hostname -I` is missing on some distros.
+detect_local_ip() {
+    local ip_addr=""
+    if command -v ip >/dev/null 2>&1; then
+        ip_addr=$(ip -4 addr show scope global 2>/dev/null | awk '$1=="inet"{split($2,a,"/"); print a[1]; exit}' || true)
+    fi
+    if [ -z "$ip_addr" ]; then
+        ip_addr=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+    fi
+    echo "$ip_addr"
+}
+
 detect_ip_addresses() {
-    local local_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
+    local local_ip=$(detect_local_ip)
     echo "Detecting public IP address..." >&2
     local public_ip=$(timeout 5 curl -4 -fsS https://api.ipify.org 2>/dev/null || \
                       timeout 5 curl -4 -fsS https://ifconfig.me 2>/dev/null || \
@@ -270,7 +316,7 @@ check_resources() {
         log_success "RAM: ${total_ram_mb}MB"
     fi
 
-    local available_space_kb=$(df /home | tail -1 | awk '{print $4}')
+    local available_space_kb=$(df -P /home | tail -1 | awk '{print $4}')
     local available_space_gb=$((available_space_kb / 1024 / 1024))
 
     if [ "$available_space_gb" -lt 5 ]; then
@@ -500,6 +546,64 @@ display_credentials() {
     fi
 }
 
+# Every port the server listens on, and whether it has to be reachable.
+# Only game + query must be open to players; the rest are admin-only or
+# legacy (see firewall_guide.md).
+print_port_table() {
+    echo " Port Configuration:"
+    if [ "$INSTALL_MODE" = "standalone" ]; then
+        echo "   Game Port      : 14567 (UDP)  public - players connect here"
+        echo "   Query Port     : 23000 (UDP)  public - server browsers"
+        echo "   GameSpy LAN    : 22000 (UDP)  LAN discovery only"
+        echo "   ASE Port       : 14690 (UDP)  legacy, not needed"
+        return 0
+    fi
+    echo "   Game Port      : ${GAME_PORT} (UDP)  public - players connect here"
+    echo "   Query Port     : ${QUERY_PORT} (UDP)  public - server browsers"
+    echo "   Management Port: ${MGMT_PORT} (TCP)  BFRM admin - restrict or SSH-tunnel"
+    echo "   Remote Console : ${CONSOLE_PORT} (TCP)  admin only - keep closed"
+    echo "   GameSpy LAN    : ${LAN_PORT} (UDP)  LAN discovery only"
+    echo "   ASE Port       : ${ASE_PORT} (UDP)  legacy, not needed"
+}
+
+# Called just before a firewall that was OFF gets switched on: every server
+# installed earlier without firewall rules would be cut off from players, so
+# open their game + query ports first (read from their own config).
+allow_existing_server_ports() {
+    local fw="$1" dir name con game query p
+    local -a ports=()
+    if [ -f /etc/systemd/system/bf1942.service ] && [ -d "${BF_HOME}/bf1942" ]; then
+        ports+=("14567/udp" "23000/udp")
+    fi
+    for dir in "${BF_HOME}"/instances/*/; do
+        [ -d "$dir" ] || continue
+        name=$(basename "$dir")
+        if [ "$name" = "$INSTANCE_NAME" ]; then
+            continue
+        fi
+        con="${dir}mods/bf1942/settings/servermanager.con"
+        if [ ! -f "$con" ]; then
+            continue
+        fi
+        game=$(awk '$1=="game.serverPort"{print $2; exit}' "$con" | tr -d '\r')
+        query=$(awk '$1=="game.gameSpyPort"{print $2; exit}' "$con" | tr -d '\r')
+        if [[ "$game" =~ ^[0-9]+$ ]]; then ports+=("${game}/udp"); fi
+        if [[ "$query" =~ ^[0-9]+$ ]]; then ports+=("${query}/udp"); fi
+    done
+    if [ ${#ports[@]} -eq 0 ]; then
+        return 0
+    fi
+    log_info "Firewall was off - also opening existing servers' ports: ${ports[*]}"
+    for p in "${ports[@]}"; do
+        if [ "$fw" = "ufw" ]; then
+            ufw allow "$p" comment "BF1942 existing server" >/dev/null
+        else
+            firewall-cmd --permanent --add-port="$p" >/dev/null
+        fi
+    done
+    return 0
+}
+
 # ------------------------------------------------------------
 # ARGUMENT PARSING
 # ------------------------------------------------------------
@@ -516,7 +620,8 @@ Options:
   --ip <local|public|ADDR>   IP to bind (BFSMD). Default with --yes: local.
   --version <2.0|2.01>       BFSMD manager version. Default: 2.0.
   --firewall <skip|open|tunnel|restrict=ADDR>
-                             skip    = leave the firewall alone (default with --yes)
+                             skip    = leave the firewall alone (default with --yes,
+                                       unless ufw/firewalld is already active - then tunnel)
                              open    = game/query + management port open to all
                              tunnel  = game/query only; management via SSH tunnel
                              restrict=ADDR = game/query open, management from ADDR only
@@ -656,13 +761,19 @@ if ! command -v dnf &> /dev/null; then
     exit 1
 fi
 
+# Warn (but allow continuing) when run on another distro or release.
+OS_TARGET_ID="fedora"
+OS_TARGET_VERSION=""
 if [ -f /etc/os-release ]; then
     . /etc/os-release
-    if [ "$ID" != "fedora" ]; then
+    if [ "${ID:-}" != "$OS_TARGET_ID" ]; then
         log_warn "This script is intended for Fedora. Detected: ${PRETTY_NAME:-unknown}"
         if ! confirm_continue; then exit 1; fi
+    elif [ -n "$OS_TARGET_VERSION" ] && [[ "${VERSION_ID:-}" != "$OS_TARGET_VERSION"* ]]; then
+        log_warn "This script targets Fedora ${OS_TARGET_VERSION}. Detected: ${PRETTY_NAME:-unknown}"
+        if ! confirm_continue; then exit 1; fi
     else
-        log_info "Detected: ${PRETTY_NAME}"
+        log_info "Detected: ${PRETTY_NAME:-$ID}"
     fi
 fi
 
@@ -862,7 +973,7 @@ if [ "$INSTALL_MODE" = "bfsmd" ]; then
             SERVER_IP=$(select_ip_address)
             ;;
         local)
-            SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
+            SERVER_IP=$(detect_local_ip)
             ;;
         public)
             SERVER_IP=$(detect_ip_addresses | cut -d'|' -f2)
@@ -917,10 +1028,7 @@ if [ "$INSTALL_MODE" = "bfsmd" ]; then
     echo " Network:"
     echo "   Server IP      : ${SERVER_IP}"
     echo ""
-    echo " Port Configuration:"
-    echo "   Game Port      : ${GAME_PORT} (UDP)"
-    echo "   Query Port     : ${QUERY_PORT} (UDP)"
-    echo "   Management Port: ${MGMT_PORT} (TCP)"
+    print_port_table
     echo ""
     echo " Performance:"
     echo "   CPU Affinity   : Cores ${CPU_AFFINITY}"
@@ -999,7 +1107,7 @@ log_step "2/8: Installing system dependencies"
 if [ ! -f "/etc/bf1942_deps_installed" ]; then
     log_info "First-time setup: Installing 32-bit libraries..."
 
-    # Detect zlib package name — Fedora 36+ ships zlib-ng; fall back to zlib
+    # Detect zlib package name - Fedora 36+ ships zlib-ng; EL9 keeps zlib
     if dnf info zlib.i686 &>/dev/null; then
         ZLIB_PKG="zlib.i686"
     else
@@ -1018,40 +1126,6 @@ if [ ! -f "/etc/bf1942_deps_installed" ]; then
     log_info "Installing legacy libstdc++5 (GCC 3.3 compatibility)..."
 
     pushd "$TEMP_DIR" > /dev/null
-
-    # These exact builds rotate off the main mirror when Debian archives an
-    # old release, so fall back to archive.debian.org before giving up.
-    fetch_legacy_deb() {
-        local path="$1"
-        local expected="$2"
-        local file="${path##*/}"
-        local primary="${file}.primary" archive="${file}.archive" candidate=""
-
-        if wget -q -O "$primary" "https://deb.debian.org/debian/${path}"; then
-            if verify_sha256 "$expected" "$primary"; then
-                mv -f "$primary" "$file"
-                return 0
-            fi
-            candidate="$primary"
-        fi
-        log_warn "Verified ${file} unavailable on deb.debian.org; trying archive.debian.org..."
-        if wget -q -O "$archive" "https://archive.debian.org/debian/${path}"; then
-            if verify_sha256 "$expected" "$archive"; then
-                mv -f "$archive" "$file"
-                rm -f "$primary"
-                return 0
-            fi
-            [ -n "$candidate" ] || candidate="$archive"
-        fi
-        if [ -n "$candidate" ] && accept_unverified_download "$expected" "$candidate" "$file"; then
-            mv -f "$candidate" "$file"
-            rm -f "$primary" "$archive"
-            return 0
-        fi
-        rm -f "$primary" "$archive"
-        log_error "Could not download an accepted copy of ${file}."
-        return 1
-    }
 
     fetch_legacy_deb "pool/main/g/gcc-3.3/libstdc++5_3.3.6-34_i386.deb" "$LIBSTDC5_SHA"
 
@@ -1372,7 +1446,10 @@ log_success "Systemd service created: ${SERVICE_NAME}.service"
 # ------------------------------------------------------------
 log_step "7/8: Configuring sudo permissions"
 
-cat > "$SUDOERS_FILE" <<EOF
+# Write to a staging file and validate it first: a broken file in
+# /etc/sudoers.d makes sudo refuse to run at all.
+SUDOERS_TMP="${TEMP_DIR}/sudoers_${INSTANCE_NAME}"
+cat > "$SUDOERS_TMP" <<EOF
 # Battlefield 1942 Server Management (${INSTANCE_NAME})
 ${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start ${SERVICE_NAME}.service
 ${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop ${SERVICE_NAME}.service
@@ -1381,9 +1458,20 @@ ${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl status ${SERVICE_NAME}.service
 ${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl status ${SERVICE_NAME}.service -l
 ${BF_USER} ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u ${SERVICE_NAME}.service
 EOF
+# Older visudo builds also check the file mode, so match the final one.
+chmod 440 "$SUDOERS_TMP"
 
-chmod 440 "$SUDOERS_FILE"
-log_success "Sudoers configured"
+if ! command -v visudo >/dev/null 2>&1; then
+    install -m 440 -o root -g root "$SUDOERS_TMP" "$SUDOERS_FILE"
+    log_warn "visudo not found - installed ${SUDOERS_FILE} without validation"
+elif visudo -cf "$SUDOERS_TMP" >/dev/null; then
+    install -m 440 -o root -g root "$SUDOERS_TMP" "$SUDOERS_FILE"
+    log_success "Sudoers configured (validated with visudo)"
+else
+    log_warn "Generated sudoers rules failed validation - not installed."
+    log_warn "The server runs normally; ${BF_USER} just cannot manage it via sudo."
+fi
+rm -f "$SUDOERS_TMP"
 
 # ------------------------------------------------------------
 # STEP 8: Start Service
@@ -1406,12 +1494,39 @@ fi
 echo ""
 log_info "Firewall Configuration"
 
+# An already-active firewall (often enabled by an earlier install) blocks
+# this instance's generated ports until rules are added for them.
+FW_ACTIVE=""
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+    FW_ACTIVE="ufw"
+elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    FW_ACTIVE="firewalld"
+fi
+if [ "$INSTALL_MODE" = "standalone" ]; then
+    FW_PORTS="14567/udp 23000/udp"
+else
+    FW_PORTS="${GAME_PORT}/udp ${QUERY_PORT}/udp"
+fi
+
 FIREWALL_MODE="$OPT_FIREWALL"
 if [ -z "$FIREWALL_MODE" ]; then
-    if [ "$ASSUME_YES" -eq 1 ]; then
+    if [ -n "$FW_ACTIVE" ]; then
+        log_warn "${FW_ACTIVE} is active - players cannot reach ${FW_PORTS} until they are opened."
+        if [ "$ASSUME_YES" -eq 1 ]; then
+            FIREWALL_MODE="tunnel"
+            log_info "--yes given - opening the game ports (management port stays closed; use an SSH tunnel)."
+        else
+            read -r -p "Open this server's ports in ${FW_ACTIVE}? [Y/n] " response
+            if [[ "$response" =~ ^([nN][oO]|[nN])$ ]]; then
+                FIREWALL_MODE="skip"
+            else
+                FIREWALL_MODE="ask"
+            fi
+        fi
+    elif [ "$ASSUME_YES" -eq 1 ]; then
         FIREWALL_MODE="skip"
     else
-        read -r -p "Configure firewalld rules? [y/N] " response
+        read -r -p "Configure firewall rules? [y/N] " response
         if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
             FIREWALL_MODE="ask"
         else
@@ -1422,12 +1537,29 @@ fi
 
 if [ "$FIREWALL_MODE" = "skip" ]; then
     log_info "Skipping firewall configuration"
+    if [ -n "$FW_ACTIVE" ]; then
+        log_warn "${FW_ACTIVE} is active and these ports are still blocked: ${FW_PORTS}"
+        log_info "Open them with:"
+        for fw_port in $FW_PORTS; do
+            if [ "$FW_ACTIVE" = "ufw" ]; then
+                echo "    sudo ufw allow ${fw_port}"
+            else
+                echo "    sudo firewall-cmd --permanent --add-port=${fw_port}"
+            fi
+        done
+        if [ "$FW_ACTIVE" = "firewalld" ]; then
+            echo "    sudo firewall-cmd --reload"
+        fi
+    fi
 elif ! command -v firewall-cmd >/dev/null 2>&1; then
     log_warn "firewalld not found - skipping firewall configuration"
 else
     if ! systemctl is-active --quiet firewalld; then
         log_info "Starting firewalld..."
         systemctl enable --now firewalld
+    fi
+    if [ -z "$FW_ACTIVE" ]; then
+        allow_existing_server_ports firewalld
     fi
     log_info "Configuring firewall..."
 
@@ -1483,7 +1615,6 @@ else
     firewall-cmd --reload
     log_success "Firewall configured"
 fi
-
 # ------------------------------------------------------------
 # SAVE & DISPLAY CREDENTIALS
 # ------------------------------------------------------------
@@ -1517,13 +1648,13 @@ if [ "$INSTALL_MODE" = "bfsmd" ]; then
     echo " Server IP        : ${SERVER_IP}"
     echo " CPU Affinity     : Cores ${CPU_AFFINITY}"
     echo ""
-    echo " Port Configuration:"
-    echo "   Game Port      : ${GAME_PORT} (UDP)"
-    echo "   Query Port     : ${QUERY_PORT} (UDP)"
-    echo "   Management Port: ${MGMT_PORT} (TCP)"
+    print_port_table
     echo ""
     echo -e " ${GREEN}✓${NC} Default credentials configured"
     echo -e " ${CYAN}Credentials file: ${CRED_FILE}${NC}"
+else
+    echo ""
+    print_port_table
 fi
 
 echo ""
@@ -1531,6 +1662,8 @@ echo " Management Commands:"
 echo "   sudo systemctl status ${SERVICE_NAME}.service"
 echo "   sudo systemctl restart ${SERVICE_NAME}.service"
 echo "   journalctl -u ${SERVICE_NAME}.service -f"
+echo "   ./bf1942_manager.sh health"
+echo "   ./bf1942_manager.sh status ${INSTANCE_NAME}"
 
 if [ "$INSTALL_MODE" = "bfsmd" ]; then
     echo ""

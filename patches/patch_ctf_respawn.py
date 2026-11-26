@@ -29,6 +29,7 @@
 #     python3 patch_ctf_respawn.py /home/bf1942_user/instances/<name>
 #
 #   If no path is given, the current working directory is used.
+#   Add --check to only report whether each binary is patched (no writes).
 #
 # The script will output [SUCCESS] if the patch was applied correctly.
 # You may then restart your server.
@@ -38,6 +39,10 @@
 import os
 import sys
 import binascii
+
+# --check: report the state of each binary without modifying anything.
+CHECK = "--check" in sys.argv[1:]
+ARGS = [a for a in sys.argv[1:] if a != "--check"]
 
 def patch_file(filename, offset, original_hex, new_hex):
     """Returns True on success/already-patched, False on failure,
@@ -62,7 +67,7 @@ def patch_file(filename, offset, original_hex, new_hex):
     
     # Open file in Read+Update Binary mode
     try:
-        with open(filename, "r+b") as f:
+        with open(filename, "rb" if CHECK else "r+b") as f:
             # 1. Go to the offset
             f.seek(offset)
             
@@ -70,6 +75,16 @@ def patch_file(filename, offset, original_hex, new_hex):
             current_data = f.read(len(orig_bytes))
             
             # 3. Compare
+            if CHECK:
+                if current_data == orig_bytes:
+                    print(f"[NEEDED] {filename}: unpatched, original bytes match - patch applies cleanly.")
+                    return True
+                if current_data == new_bytes:
+                    print(f"[PATCHED] {filename}: already patched.")
+                    return True
+                print(f"[MISMATCH] {filename}: unknown bytes at 0x{offset:X} - different build, patch would be refused.")
+                return False
+
             if current_data == orig_bytes:
                 print(f"[OK] Original bytes match at offset 0x{offset:X}.")
 
@@ -115,8 +130,8 @@ dynamic_new  = "56 50 ff 53 68 8b 5d 08 8b 43 4c 8b 80 70 01 00 00 89 83 1c 01 0
 # ==============================================================================
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        server_dir = sys.argv[1]
+    if ARGS:
+        server_dir = ARGS[0]
         if not os.path.isdir(server_dir):
             print(f"[ERROR] Directory not found: {server_dir}")
             sys.exit(1)

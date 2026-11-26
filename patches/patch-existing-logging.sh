@@ -19,6 +19,7 @@
 #  Usage:
 #    sudo ./patch-existing-logging.sh                  # auto-detect installs
 #    sudo ./patch-existing-logging.sh /path/to/server  # patch specific dir(s)
+#    sudo ./patch-existing-logging.sh --check [dirs]   # report only, no changes
 #
 #  A server root is the directory that contains mods/bf1942 (for example
 #  /home/bf1942_user/bf1942 or /home/bf1942_user/instances/<name>).
@@ -37,6 +38,12 @@ log_info()    { echo -e "\e[34m[INFO]\e[0m $1"; }
 log_success() { echo -e "\e[32m[OK]\e[0m $1"; }
 log_warn()    { echo -e "\e[33m[WARN]\e[0m $1"; }
 log_error()   { echo -e "\e[31m[ERROR]\e[0m $1"; }
+
+CHECK=0
+if [ "${1:-}" = "--check" ]; then
+    CHECK=1
+    shift
+fi
 
 if [[ $EUID -ne 0 ]]; then
     log_error "Run with sudo: sudo $0 $*"
@@ -82,6 +89,11 @@ patch_install() {
             log_success "  ${con}: already correct"
             continue
         fi
+        if [ "$CHECK" -eq 1 ]; then
+            log_warn "  ${con}: event logging not fully enabled - would be patched"
+            PATCHED_ANY=1
+            continue
+        fi
 
         cp -p "$f" "${f}.bak-logging-${stamp}"
         set_setting "$f" "game.serverEventLogging" "1"
@@ -122,6 +134,10 @@ else
 fi
 
 echo ""
+if [ "$CHECK" -eq 1 ]; then
+    [ "$PATCHED_ANY" -eq 1 ] && log_info "Run without --check to apply." || log_success "Nothing to change."
+    exit 0
+fi
 if [ "$PATCHED_ANY" -eq 1 ]; then
     log_warn "Restart the affected server(s) for the change to take effect:"
     echo "         standalone:      sudo systemctl restart bf1942.service"

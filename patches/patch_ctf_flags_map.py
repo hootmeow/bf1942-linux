@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # ==============================================================================
-#  CTF flags falling trough map objects
+#  CTF flags falling through map objects
 # ==============================================================================
 #
 # This Python script automates the binary patch required to fix the "CTF Flag
-# falling trough map objects" bug, where the  flags always fall onto the map terrain,
-# falling trough any buildings the player might stand on.
+# falling through map objects" bug, where the  flags always fall onto the map terrain,
+# falling through any buildings the player might stand on.
 #
 # Original Patch Credit: UUUZbf (https://github.com/uuuzbf/bf1942-patches)
 #
@@ -29,6 +29,7 @@
 #     python3 patch_ctf_flags_map.py /home/bf1942_user/instances/<name>
 #
 #   If no path is given, the current working directory is used.
+#   Add --check to only report whether each binary is patched (no writes).
 #
 # The script will output [SUCCESS] if the patch was applied correctly.
 # You may then restart your server.
@@ -39,6 +40,10 @@
 import os
 import sys
 import binascii
+
+# --check: report the state of each binary without modifying anything.
+CHECK = "--check" in sys.argv[1:]
+ARGS = [a for a in sys.argv[1:] if a != "--check"]
 
 def patch_file(filename, offset, original_hex, new_hex):
     """Returns True on success/already-patched, False on failure,
@@ -63,7 +68,7 @@ def patch_file(filename, offset, original_hex, new_hex):
     
     # Open file in Read+Update Binary mode
     try:
-        with open(filename, "r+b") as f:
+        with open(filename, "rb" if CHECK else "r+b") as f:
             # 1. Go to the offset
             f.seek(offset)
             
@@ -71,6 +76,16 @@ def patch_file(filename, offset, original_hex, new_hex):
             current_data = f.read(len(orig_bytes))
             
             # 3. Compare
+            if CHECK:
+                if current_data == orig_bytes:
+                    print(f"[NEEDED] {filename}: unpatched, original bytes match - patch applies cleanly.")
+                    return True
+                if current_data == new_bytes:
+                    print(f"[PATCHED] {filename}: already patched.")
+                    return True
+                print(f"[MISMATCH] {filename}: unknown bytes at 0x{offset:X} - different build, patch would be refused.")
+                return False
+
             if current_data == orig_bytes:
                 print(f"[OK] Original bytes match at offset 0x{offset:X}.")
 
@@ -116,8 +131,8 @@ dynamic_new  = "d9 54 24 04 c7 04 24 00 02 00 02 8B 75 0C 8B 06 56 FF 50 3C 89 0
 # ==============================================================================
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        server_dir = sys.argv[1]
+    if ARGS:
+        server_dir = ARGS[0]
         if not os.path.isdir(server_dir):
             print(f"[ERROR] Directory not found: {server_dir}")
             sys.exit(1)

@@ -518,6 +518,8 @@ For each instance the runner checks first and only touches instances that need s
 - To undo: stop the service and copy `bf1942_lnxded.<static|dynamic>.orig` back over the patched file. (If you had patched a binary by hand before ever using the runner, `.orig` holds that hand-patched copy.)
 
 > ⚠️ **Replay recorder:** the bfstats.io recorder (`install-replay-recorder.sh`) only hooks the *unmodified* `bf1942_lnxded.static`. The runner therefore **skips binary patches on instances that have the recorder installed** — pass `--with-recorder` to patch them anyway (recordings will stop working on those instances).
+>
+> `install-replay-recorder.sh` always installs the **newest `recorder-v*` release** from [sila-skandia/bfstats](https://github.com/sila-skandia/bfstats/releases) and checks it against the release's `recorder.so.sha256`. Its status screen shows the installed version and flags when an update is available (re-run *Install / update*). Pin a version with `RECORDER_TAG=recorder-v0.3.0 sudo -E bash install-replay-recorder.sh`.
 
 ---
 

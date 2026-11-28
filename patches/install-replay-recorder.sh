@@ -12,12 +12,17 @@
 #   - LD_PRELOAD set via a systemd drop-in on the instance's unit
 #   - server must run the stock bf1942_lnxded.static build
 #
+# Always installs the newest recorder-v* release (checked against the
+# release's recorder.so.sha256), so upstream updates need no change here.
+#
 # Usage: sudo bash install-replay-recorder.sh
+#        RECORDER_TAG=recorder-v0.3.0 sudo -E bash install-replay-recorder.sh   # pin a version
 # ------------------------------------------------------------
 set -euo pipefail
 
-URL="https://github.com/sila-skandia/bfstats/releases/download/recorder-v0.3.0/recorder.so"
-VERSION="v0.3.0"
+REPO="sila-skandia/bfstats"
+# Used only when the GitHub API can't be reached (offline, rate limit).
+FALLBACK_TAG="recorder-v0.3.1"
 STATIC_SHA256="18237721d2bd92f7bd01902d127cfcb8771b62eea1813ae67de638462e55b2e6"
 BF_HOME="/home/bf1942_user"
 USR="bf1942_user"
@@ -43,6 +48,37 @@ pause() { echo; read -r -p "  Press Enter to continue..." _; }
 
 [ "$(id -u)" -eq 0 ] || { err "Run with sudo."; exit 1; }
 command -v curl >/dev/null || { err "curl is required."; exit 1; }
+
+# ------------------------------------------------------------
+# Release lookup
+# ------------------------------------------------------------
+# Newest published (not draft / pre-release) recorder-v* tag. The repo has
+# other releases too, so /releases/latest isn't necessarily the recorder.
+latest_recorder_tag() {
+    curl -fsS --max-time 10 -H "Accept: application/vnd.github+json"         "https://api.github.com/repos/${REPO}/releases?per_page=30" 2>/dev/null |
+        awk -F'"' '
+            /"tag_name":/   { tag = $4 }
+            /"draft":/      { draft = ($0 ~ /true/) }
+            /"prerelease":/ { if (!found && tag ~ /^recorder-v/ && !draft && $0 !~ /true/) { print tag; found = 1 } }
+        '
+    # (awk reads to the end: exiting early would SIGPIPE curl and fail the pipe)
+}
+
+if [ -n "${RECORDER_TAG:-}" ]; then
+    TAG="$RECORDER_TAG"
+    TAG_NOTE="pinned via RECORDER_TAG"
+elif TAG="$(latest_recorder_tag)" && [ -n "$TAG" ]; then
+    TAG_NOTE="latest release"
+else
+    TAG="$FALLBACK_TAG"
+    TAG_NOTE="GitHub API unreachable - using built-in ${FALLBACK_TAG}"
+fi
+[[ "$TAG" =~ ^recorder-v[0-9A-Za-z._-]+$ ]] || { err "Unexpected release tag: $TAG"; exit 1; }
+VERSION="${TAG#recorder-}"
+URL="https://github.com/${REPO}/releases/download/${TAG}/recorder.so"
+SHA_URL="${URL}.sha256"
+
+installed_version() { cat "$1/recorder.version" 2>/dev/null || true; }
 
 # ------------------------------------------------------------
 # Discovery
@@ -93,6 +129,8 @@ status_line() {   # one-line summary for the menu
     local d="$1" s pid
     if installed "$d"; then
         enabled "$d" && s="${G}recording${N}" || s="${Y}installed, disabled${N}"
+        local iv; iv="$(installed_version "$d")"
+        [ -n "$iv" ] && [ "$iv" != "$VERSION" ] && s="$s, ${Y}$iv -> $VERSION available${N}"
     else
         s="not installed"
     fi
@@ -123,7 +161,18 @@ show_status() {
     else
         echo "  Static:    ${R}bf1942_lnxded.static missing${N}"
     fi
-    [ -f "$d/recorder.so" ] && echo "  recorder:  $d/recorder.so" || echo "  recorder:  not installed"
+    if [ -f "$d/recorder.so" ]; then
+        local iv; iv="$(installed_version "$d")"
+        if [ -z "$iv" ]; then
+            echo "  recorder:  $d/recorder.so (version unknown - reinstall to track it)"
+        elif [ "$iv" = "$VERSION" ]; then
+            echo "  recorder:  $d/recorder.so ${G}$iv (up to date)${N}"
+        else
+            echo "  recorder:  $d/recorder.so ${Y}$iv - $VERSION available, use Install / update${N}"
+        fi
+    else
+        echo "  recorder:  not installed"
+    fi
     if [ -f "$d/recorder.con" ]; then
         enabled "$d" && echo "  Recording: ${G}on${N} @ $(sample_hz "$d") Hz" || echo "  Recording: ${Y}off${N}"
     fi
@@ -271,7 +320,21 @@ do_install() {
     step "Downloading recorder.so"
     tmp="$(mktemp)"
     if ! curl -fL --retry 3 --progress-bar -o "$tmp" "$URL"; then
-        err "Download failed."; rm -f "$tmp"; return
+        err "Download failed: $URL"; rm -f "$tmp"; return
+    fi
+    local want got
+    want="$(curl -fsSL --retry 3 "$SHA_URL" 2>/dev/null | awk '{print $1; exit}' || true)"
+    got="$(sha256sum "$tmp" | cut -d' ' -f1)"
+    if [[ ! "$want" =~ ^[0-9a-f]{64}$ ]]; then
+        warn "No recorder.so.sha256 published for $TAG - can't verify the download."
+        confirm "Install it unverified?" n || { rm -f "$tmp"; return; }
+    elif [ "$want" != "$got" ]; then
+        err "Checksum mismatch for recorder.so $VERSION"
+        echo "     Expected $want"
+        echo "     Got      $got"
+        rm -f "$tmp"; return
+    else
+        ok "Checksum verified"
     fi
     if ! file -b "$tmp" | grep -q 'ELF 32-bit.*shared object'; then
         err "Downloaded file isn't a 32-bit .so: $(file -b "$tmp")"; rm -f "$tmp"; return
@@ -292,7 +355,9 @@ do_install() {
     # Temp name + mv so a running server never sees a half-written .so
     install -m 755 -o "$USR" -g "$USR" "$tmp" "$d/recorder.so.new"; rm -f "$tmp"
     mv -f "$d/recorder.so.new" "$d/recorder.so"
-    ok "recorder.so"
+    echo "$VERSION" > "$d/recorder.version"
+    chown "$USR:$USR" "$d/recorder.version"
+    ok "recorder.so $VERSION"
 
     printf 'recordReplays 1\nreplaySampleHz %s\n' "$hz" > "$d/recorder.con"
     chown "$USR:$USR" "$d/recorder.con"
@@ -344,7 +409,7 @@ do_remove() {
         systemctl daemon-reload
         ok "Removed drop-in"
     fi
-    rm -f "$d/recorder.so" "$d/recorder.con"
+    rm -f "$d/recorder.so" "$d/recorder.con" "$d/recorder.version"
     ok "Removed recorder.so and recorder.con"
 
     if [ -d "$d/replays" ] && [ -n "$(ls -A "$d/replays")" ]; then
@@ -388,7 +453,7 @@ main_menu() {
     while true; do
         mapfile -t installs < <(find_installs)
         clear 2>/dev/null || true
-        echo "${B}BF1942 Replay Recorder $VERSION${N}  (bfstats.io)"
+        echo "${B}BF1942 Replay Recorder $VERSION${N}  (bfstats.io, $TAG_NOTE)"
         echo
         if [ "${#installs[@]}" -eq 0 ]; then
             err "No BF1942 installs found under $BF_HOME"

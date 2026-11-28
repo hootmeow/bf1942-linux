@@ -36,28 +36,46 @@ os_id="${ID:-}"
 os_like=" ${ID_LIKE:-} "
 os_ver="${VERSION_ID:-}"
 
+os_major="${os_ver%%.*}"
+
+# Ubuntu release by codename: also set by derivatives (Mint, Pop!_OS,
+# Zorin, elementary ...) whose own VERSION_ID means something else.
+ubuntu_installer() {
+    case "${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}:$1" in
+        jammy:*|*:22.*)    echo "installers/ubuntu/ubu_22.04_bfsmd_setup.sh" ;;
+        noble:*|*:24.*)    echo "installers/ubuntu/ubu_24.0.3_bfsmd_setup.sh" ;;
+        *)                 echo "installers/ubuntu/ubu_26.04_bfsmd_setup.sh" ;;
+    esac
+}
+
+# Enterprise Linux 10 dropped every 32-bit (i686) package.
+el_supported() {
+    if [[ "$os_major" =~ ^[0-9]+$ ]] && [ "$os_major" -ge 10 ]; then
+        die "${PRETTY_NAME:-$os_id} has no 32-bit (i686) packages, so Battlefield 1942 can't run on it. Use an EL 9 release, Debian, Ubuntu, Fedora or openSUSE."
+    fi
+}
+
 installer=""
 case "$os_id" in
-    ubuntu)
-        case "$os_ver" in
-            22.*) installer="installers/ubuntu/ubu_22.04_bfsmd_setup.sh" ;;
-            *)    installer="installers/ubuntu/ubu_24.0.3_bfsmd_setup.sh" ;;
-        esac
-        ;;
-    debian)              installer="installers/debian/deb_12_bfsmd_setup.sh" ;;
-    fedora)              installer="installers/fedora/fed_44_bfsmd_setup.sh" ;;
-    rhel|rocky|almalinux) installer="installers/rhel/rhel_9_bfsmd_setup.sh" ;;
-    centos)              installer="installers/centos/centos_stream9_bfsmd_setup.sh" ;;
-    arch)                installer="installers/arch/arch_bfsmd_setup.sh" ;;
+    ubuntu)                  installer="$(ubuntu_installer "$os_ver")" ;;
+    debian)                  installer="installers/debian/deb_12_bfsmd_setup.sh" ;;
+    fedora)                  installer="installers/fedora/fed_44_bfsmd_setup.sh" ;;
+    rhel|rocky|almalinux|ol) el_supported; installer="installers/rhel/rhel_9_bfsmd_setup.sh" ;;
+    centos)                  el_supported; installer="installers/centos/centos_stream9_bfsmd_setup.sh" ;;
+    arch)                    installer="installers/arch/arch_bfsmd_setup.sh" ;;
+    opensuse-*)              installer="installers/opensuse/opensuse_bfsmd_setup.sh" ;;
     *)
         # Derivatives: pick the closest family from ID_LIKE.
         if [[ "$os_like" == *" arch "* ]]; then
             installer="installers/arch/arch_bfsmd_setup.sh"
         elif [[ "$os_like" == *" ubuntu "* ]]; then
-            installer="installers/ubuntu/ubu_24.0.3_bfsmd_setup.sh"
+            installer="$(ubuntu_installer "")"
         elif [[ "$os_like" == *" debian "* ]]; then
             installer="installers/debian/deb_12_bfsmd_setup.sh"
+        elif [[ "$os_like" == *" suse "* ]] || [[ "$os_like" == *" opensuse "* ]]; then
+            installer="installers/opensuse/opensuse_bfsmd_setup.sh"
         elif [[ "$os_like" == *" rhel "* ]] || [[ "$os_like" == *" centos "* ]]; then
+            el_supported
             installer="installers/rhel/rhel_9_bfsmd_setup.sh"
         elif [[ "$os_like" == *" fedora "* ]]; then
             installer="installers/fedora/fed_44_bfsmd_setup.sh"

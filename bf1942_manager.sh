@@ -276,12 +276,14 @@ list_instances() {
         echo ""
         echo "Or run the installer for your distro directly:"
         echo "  sudo ./installers/arch/arch_bfsmd_setup.sh         [instance_name]"
+        echo "  sudo ./installers/ubuntu/ubu_26.04_bfsmd_setup.sh  [instance_name]"
         echo "  sudo ./installers/ubuntu/ubu_24.0.3_bfsmd_setup.sh [instance_name]"
         echo "  sudo ./installers/ubuntu/ubu_22.04_bfsmd_setup.sh  [instance_name]"
         echo "  sudo ./installers/debian/deb_12_bfsmd_setup.sh     [instance_name]"
         echo "  sudo ./installers/fedora/fed_44_bfsmd_setup.sh     [instance_name]"
         echo "  sudo ./installers/rhel/rhel_9_bfsmd_setup.sh       [instance_name]"
         echo "  sudo ./installers/centos/centos_stream9_bfsmd_setup.sh [instance_name]"
+        echo "  sudo ./installers/opensuse/opensuse_bfsmd_setup.sh [instance_name]"
     fi
     
     echo ""
@@ -1259,6 +1261,7 @@ ensure_python3() {
     if command -v apt-get >/dev/null 2>&1; then cmd="apt-get install -y python3"
     elif command -v dnf >/dev/null 2>&1; then cmd="dnf install -y python3"
     elif command -v pacman >/dev/null 2>&1; then cmd="pacman -S --noconfirm --needed python"
+    elif command -v zypper >/dev/null 2>&1; then cmd="zypper --non-interactive install python3"
     fi
     log_warn "python3 is needed for the binary patches and isn't installed."
     if [ -z "$cmd" ]; then

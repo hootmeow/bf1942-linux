@@ -16,7 +16,7 @@ Automated setup for running **Battlefield 1942 Dedicated Servers** on modern 64-
 - **Smart configuration** — interactive IP detection, port conflict prevention, resource validation
 - **Performance optimized** — CPU affinity, memory limits, and I/O tuning per instance
 - **Secure by default** — runs under a dedicated non-privileged account (`bf1942_user`)
-- **Firewall integration** — UFW on Debian/Ubuntu, firewalld on Fedora/RHEL/CentOS
+- **Firewall integration** — UFW on Debian/Ubuntu, firewalld on Fedora/RHEL/CentOS/openSUSE
 - **Systemd managed** — standard `systemctl` commands for all service control
 - **Shared management tool** — one `bf1942_manager.sh` at the repo root works across all distros
 
@@ -42,15 +42,21 @@ In **BFSMD mode** each instance is its own systemd service running BFSMD, which 
 
 | Distro | Script |
 |--------|--------|
-| **Arch Linux** | `installers/arch/arch_bfsmd_setup.sh` |
+| **Arch Linux** (and EndeavourOS, Manjaro, ...) | `installers/arch/arch_bfsmd_setup.sh` |
+| **Ubuntu 26.04 LTS** *(runtime validation pending)* | `installers/ubuntu/ubu_26.04_bfsmd_setup.sh` |
 | **Ubuntu 24.04 LTS** | `installers/ubuntu/ubu_24.0.3_bfsmd_setup.sh` |
 | **Ubuntu 22.04 LTS** | `installers/ubuntu/ubu_22.04_bfsmd_setup.sh` |
 | **Debian 12 (Bookworm) / 13 (Trixie)** | `installers/debian/deb_12_bfsmd_setup.sh` |
-| **Fedora 44** *(runtime validation pending)* | `installers/fedora/fed_44_bfsmd_setup.sh` |
-| **RHEL 9** | `installers/rhel/rhel_9_bfsmd_setup.sh` |
+| **Fedora 43 – 45** *(runtime validation pending)* | `installers/fedora/fed_44_bfsmd_setup.sh` |
+| **RHEL 9 / Rocky 9 / AlmaLinux 9 / Oracle Linux 9** | `installers/rhel/rhel_9_bfsmd_setup.sh` |
 | **CentOS Stream 9** | `installers/centos/centos_stream9_bfsmd_setup.sh` |
+| **openSUSE Leap 16 / Tumbleweed** *(runtime validation pending)* | `installers/opensuse/opensuse_bfsmd_setup.sh` |
+
+`install.sh` also picks the right script for derivatives: Linux Mint, Pop!_OS, Zorin and other Ubuntu-based distros get the installer for the Ubuntu release they're built on.
 
 Fedora has no LTS release; the RHEL 9 installer is the longer-support option.
+
+> ⚠️ **Not supported: Enterprise Linux 10** (RHEL / Rocky / AlmaLinux / CentOS Stream 10). EL 10 dropped every 32-bit (i686) package, and the BF1942 server is a 32-bit program, so it has nothing to run on. The installers and `install.sh` stop with an explanation instead of half-installing. Use an EL 9 release (supported until 2032) or another distro above.
 
 ---
 
@@ -153,11 +159,12 @@ Each instance automatically gets unique ports, its own systemd service, and dedi
 | Distro | Key Differences |
 |--------|----------------|
 | Arch Linux | Needs `[multilib]` enabled; uses the static server binary with a local ncurses shim (no legacy packages) |
-| Ubuntu 22.04 / 24.04 | Auto-detects `libcurl4` vs `libcurl4t64:i386` at runtime |
+| Ubuntu 22.04 / 24.04 / 26.04 | Auto-detects `libcurl4` vs `libcurl4t64:i386` at runtime |
 | Debian 12/13 | Auto-detects `libcurl4` vs `libcurl4t64` at runtime |
 | Fedora 44 | `dnf` + `.i686` packages, firewalld, SELinux (`restorecon`), zlib-ng auto-detection |
-| RHEL 9 | Same as Fedora + automatically enables EPEL and CRB repos |
+| RHEL 9 (+ Rocky / Alma / Oracle) | Same as Fedora + automatically enables EPEL and CRB repos |
 | CentOS Stream 9 | Same as RHEL 9 |
+| openSUSE Leap 16 / Tumbleweed | `zypper` + native `-32bit` packages (including `libncurses5`), firewalld, SELinux (`restorecon`) |
 
 ---
 
@@ -511,6 +518,7 @@ bf1942-linux/
 │   ├── arch/
 │   │   └── arch_bfsmd_setup.sh
 │   ├── ubuntu/
+│   │   ├── ubu_26.04_bfsmd_setup.sh
 │   │   ├── ubu_24.0.3_bfsmd_setup.sh
 │   │   └── ubu_22.04_bfsmd_setup.sh
 │   ├── debian/
@@ -519,8 +527,10 @@ bf1942-linux/
 │   │   └── fed_44_bfsmd_setup.sh
 │   ├── rhel/
 │   │   └── rhel_9_bfsmd_setup.sh
-│   └── centos/
-│       └── centos_stream9_bfsmd_setup.sh
+│   ├── centos/
+│   │   └── centos_stream9_bfsmd_setup.sh
+│   └── opensuse/
+│       └── opensuse_bfsmd_setup.sh
 ├── src/                       # Installer source (edit here, then run src/build.sh)
 │   ├── build.sh                    # Assembles installers/ from the pieces below
 │   ├── installer.sh.in             # Shared installer template

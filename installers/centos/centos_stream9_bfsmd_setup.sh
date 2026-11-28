@@ -844,6 +844,7 @@ install_patches() {
         if command -v apt-get >/dev/null 2>&1; then py=(apt-get install -y python3)
         elif command -v dnf >/dev/null 2>&1; then py=(dnf install -y python3)
         elif command -v pacman >/dev/null 2>&1; then py=(pacman -S --needed --noconfirm python)
+        elif command -v zypper >/dev/null 2>&1; then py=(zypper --non-interactive install python3)
         fi
         if [ ${#py[@]} -eq 0 ]; then
             log_warn "python3 is needed for the patches and couldn't be installed automatically."
@@ -1028,12 +1029,26 @@ if ! command -v dnf &> /dev/null; then
     exit 1
 fi
 
+# Enterprise Linux 10 (RHEL, Rocky, Alma, CentOS Stream 10) dropped all
+# 32-bit (i686) packages, so the 32-bit server can't get its libraries.
+EL_MAJOR=""
+if [ -f /etc/os-release ]; then
+    EL_MAJOR=$(. /etc/os-release; echo "${VERSION_ID%%.*}")
+fi
+if [[ "$EL_MAJOR" =~ ^[0-9]+$ ]] && [ "$EL_MAJOR" -ge 10 ]; then
+    log_error "Enterprise Linux ${EL_MAJOR} has no 32-bit (i686) packages - Battlefield 1942 can't run on it."
+    echo "  Use an EL 9 release (RHEL / Rocky / Alma / CentOS Stream 9), Debian, Ubuntu,"
+    echo "  Fedora or openSUSE instead."
+    exit 1
+fi
+
 # Warn (but allow continuing) when run on another distro or release.
-OS_TARGET_ID="centos"
+# OS_TARGET_IDS may list several IDs (e.g. a distro and its rebuilds).
+OS_TARGET_IDS=" centos "
 OS_TARGET_VERSION="9"
 if [ -f /etc/os-release ]; then
     . /etc/os-release
-    if [ "${ID:-}" != "$OS_TARGET_ID" ]; then
+    if [[ "$OS_TARGET_IDS" != *" ${ID:-unknown} "* ]]; then
         log_warn "This script is intended for CentOS Stream. Detected: ${PRETTY_NAME:-unknown}"
         if ! confirm_continue; then exit 1; fi
     elif [ -n "$OS_TARGET_VERSION" ] && [[ "${VERSION_ID:-}" != "$OS_TARGET_VERSION"* ]]; then
@@ -1485,7 +1500,14 @@ log_step "1/8: Configuring service user: ${BF_USER}"
 if id "$BF_USER" >/dev/null 2>&1; then
     log_info "User ${BF_USER} already exists. Skipping creation."
 else
-    useradd -m -s /bin/bash "$BF_USER"
+    # Own same-name group: openSUSE (and some others) would otherwise put
+    # the user in the shared "users" group, and everything is chowned to
+    # ${BF_USER}:${BF_USER}.
+    if getent group "$BF_USER" >/dev/null 2>&1; then
+        useradd -m -s /bin/bash -g "$BF_USER" "$BF_USER"
+    else
+        useradd -m -s /bin/bash -U "$BF_USER"
+    fi
     log_success "User created."
 
     # A password is not needed to run the server, and a login-locked

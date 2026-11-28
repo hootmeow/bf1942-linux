@@ -5,11 +5,12 @@ fi
 #@include? preflight_extra
 
 # Warn (but allow continuing) when run on another distro or release.
-OS_TARGET_ID="@@OS_ID@@"
+# OS_TARGET_IDS may list several IDs (e.g. a distro and its rebuilds).
+OS_TARGET_IDS=" @@OS_ID@@ "
 OS_TARGET_VERSION="@@OS_VERSION@@"
 if [ -f /etc/os-release ]; then
     . /etc/os-release
-    if [ "${ID:-}" != "$OS_TARGET_ID" ]; then
+    if [[ "$OS_TARGET_IDS" != *" ${ID:-unknown} "* ]]; then
         log_warn "This script is intended for @@OS_NAME@@. Detected: ${PRETTY_NAME:-unknown}"
         if ! confirm_continue; then exit 1; fi
     elif [ -n "$OS_TARGET_VERSION" ] && [[ "${VERSION_ID:-}" != "$OS_TARGET_VERSION"* ]]; then

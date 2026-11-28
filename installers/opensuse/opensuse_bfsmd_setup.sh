@@ -33,8 +33,9 @@ LIBTINFO5_SHA="35375adcb232873346377aa7a4ce64483ab4858d3b0ec63c7cf8ec07d12e742f"
 LIBNCURSES5_SHA="80c6cae3f063fcccd5bdabc475692bbc3b0e43de5ad1e272a3d2b105cbccfc62"
 
 verify_sha256() {
-    local expected="$1" file="$2"
-    printf '%s  %s\n' "$expected" "$file" | sha256sum --check --status
+    local expected="$1" file="$2" actual
+    actual=$(sha256sum "$file" 2>/dev/null | awk '{print $1}') || return 1
+    [ -n "$actual" ] && [ "$actual" = "$expected" ]
 }
 
 accept_unverified_download() {
@@ -850,10 +851,10 @@ install_patches() {
 
     if ! command -v python3 >/dev/null 2>&1; then
         local -a py=()
-        if command -v apt-get >/dev/null 2>&1; then py=(apt-get install -y python3)
+        if command -v apt-get >/dev/null 2>&1; then py=(apt-get -o DPkg::Lock::Timeout=300 install -y python3)
         elif command -v dnf >/dev/null 2>&1; then py=(dnf install -y python3)
         elif command -v pacman >/dev/null 2>&1; then py=(pacman -S --needed --noconfirm python)
-        elif command -v zypper >/dev/null 2>&1; then py=(zypper --non-interactive install python3)
+        elif command -v zypper >/dev/null 2>&1; then py=(env ZYPP_LOCK_TIMEOUT=300 zypper --non-interactive install python3)
         fi
         if [ ${#py[@]} -eq 0 ]; then
             log_warn "python3 is needed for the patches and couldn't be installed automatically."
@@ -1036,6 +1037,19 @@ echo "==== $(date '+%F %T') $0 ${ORIG_ARGS}" >> "$INSTALL_LOG"
 if ! command -v zypper &> /dev/null; then
     log_error "This script requires zypper (openSUSE Leap 16 / Tumbleweed)."
     exit 1
+fi
+
+# Fail before any questions if the repositories have no 32-bit packages.
+# ZYPP_LOCK_TIMEOUT: wait for PackageKit / another zypper instead of failing.
+if run_quiet --soft "Checking for 32-bit packages" \
+        env ZYPP_LOCK_TIMEOUT=180 zypper --non-interactive --gpg-auto-import-keys search --match-exact glibc-32bit; then
+    :
+elif env ZYPP_LOCK_TIMEOUT=180 zypper --non-interactive search --match-exact glibc >/dev/null 2>&1; then
+    log_error "This release has no 32-bit packages (glibc-32bit) - Battlefield 1942 can't run on it."
+    echo "  The server is a 32-bit program. Use openSUSE Leap 16 / Tumbleweed, Debian, Ubuntu or Fedora."
+    exit 1
+else
+    log_warn "Couldn't reach the package repositories to check for 32-bit support - continuing."
 fi
 
 # Warn (but allow continuing) when run on another distro or release.
@@ -1538,7 +1552,9 @@ log_step "2/8: Installing system dependencies"
 if [ ! -f "/etc/bf1942_deps_installed" ]; then
     log_info "First-time setup: Installing 32-bit libraries..."
 
-    ZYPPER=(zypper --non-interactive --gpg-auto-import-keys)
+    # ZYPP_LOCK_TIMEOUT: on desktop installs PackageKit often holds the zypp
+    # lock for a few minutes - wait for it instead of failing.
+    ZYPPER=(env ZYPP_LOCK_TIMEOUT=300 zypper --non-interactive --gpg-auto-import-keys)
     run_quiet "Refreshing repositories" "${ZYPPER[@]}" refresh
 
     # openSUSE ships 32-bit libraries as <name>-32bit (installed to /usr/lib),
@@ -1833,6 +1849,33 @@ if command -v restorecon >/dev/null 2>&1; then
     restorecon -Rv "${BF_HOME}" 2>/dev/null || true
 fi
 
+# With SELinux enforcing, systemd may not run programs labelled as home
+# directory files (user_home_t): the service fails with status=203/EXEC.
+# Label the server folder bin_t, so the service runs as an ordinary
+# unconfined system service. A semanage rule survives relabels/restorecon;
+# chcon is the fallback when the SELinux tools can't be installed.
+if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
+    if ! command -v semanage >/dev/null 2>&1; then
+        if command -v dnf >/dev/null 2>&1; then
+            run_quiet --soft "Installing SELinux tools (semanage)" \
+                dnf install -y policycoreutils-python-utils || true
+        elif command -v zypper >/dev/null 2>&1; then
+            run_quiet --soft "Installing SELinux tools (semanage)" \
+                env ZYPP_LOCK_TIMEOUT=180 zypper --non-interactive install policycoreutils-python-utils || true
+        fi
+    fi
+    SELINUX_SPEC="${BF_ROOT}(/.*)?"
+    if command -v semanage >/dev/null 2>&1 &&
+        { semanage fcontext -a -t bin_t "$SELINUX_SPEC" 2>/dev/null ||
+          semanage fcontext -m -t bin_t "$SELINUX_SPEC" 2>/dev/null; }; then
+        restorecon -R "$BF_ROOT" 2>/dev/null || true
+        log_success "SELinux: ${BF_ROOT} labelled bin_t (persistent rule)"
+    elif chcon -R -t bin_t "$BF_ROOT" 2>/dev/null; then
+        log_warn "SELinux: labelled ${BF_ROOT} with chcon (a full relabel would undo it - install policycoreutils-python-utils and re-run with --repair)"
+    else
+        log_warn "SELinux: couldn't label ${BF_ROOT}. If the service fails with 203/EXEC: sudo chcon -R -t bin_t ${BF_ROOT}"
+    fi
+fi
 # ------------------------------------------------------------
 # STEP 6: Systemd Service
 # ------------------------------------------------------------
@@ -1919,7 +1962,7 @@ chmod 440 "$SUDOERS_TMP"
 if ! command -v visudo >/dev/null 2>&1; then
     install -m 440 -o root -g root "$SUDOERS_TMP" "$SUDOERS_FILE"
     log_warn "visudo not found - installed ${SUDOERS_FILE} without validation"
-elif visudo -cf "$SUDOERS_TMP" >/dev/null; then
+elif visudo -c -f "$SUDOERS_TMP" >/dev/null; then
     install -m 440 -o root -g root "$SUDOERS_TMP" "$SUDOERS_FILE"
     log_success "Sudoers configured (validated with visudo)"
 else

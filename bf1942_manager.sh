@@ -150,6 +150,27 @@ query_server() {
     echo "${kv[hostname]:-?}|${kv[mapname]:-?}|${kv[numplayers]:-?}|${kv[maxplayers]:-?}"
 }
 
+# SELinux: systemd may not execute programs labelled as home-directory
+# files, so the installer labels each server folder bin_t. Re-apply that
+# (restore) or drop the rule (remove). No-op without SELinux.
+selinux_label() {
+    command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled || return 0
+    local dir="$1"
+    if command -v semanage >/dev/null 2>&1 &&
+        { semanage fcontext -a -t bin_t "${dir}(/.*)?" 2>/dev/null ||
+          semanage fcontext -m -t bin_t "${dir}(/.*)?" 2>/dev/null; }; then
+        restorecon -R "$dir" 2>/dev/null || true
+    else
+        chcon -R -t bin_t "$dir" 2>/dev/null || true
+    fi
+    return 0
+}
+
+selinux_unlabel() {
+    command -v semanage >/dev/null 2>&1 || return 0
+    semanage fcontext -d "${1}(/.*)?" 2>/dev/null || true
+}
+
 # Check if service file exists
 service_exists() {
     local service="$1"
@@ -799,6 +820,7 @@ remove_instance() {
     log_info "Removing instance files..."
     rm -rf -- "$name"
     popd >/dev/null
+    selinux_unlabel "${BF_BASE}/${name}"
 
     # Best effort: removes the plain allow rules the installer created.
     # An IP-restricted management rule ("allow from X to any port N") has to
@@ -983,7 +1005,7 @@ restore_instance() {
 
     local sudoers_src="${meta}/bf1942_${name}" sudoers_dst="/etc/sudoers.d/bf1942_${name}"
     if [ -f "$sudoers_src" ] && [ ! -f "$sudoers_dst" ]; then
-        if ! command -v visudo >/dev/null 2>&1 || visudo -cf "$sudoers_src" >/dev/null; then
+        if ! command -v visudo >/dev/null 2>&1 || visudo -c -f "$sudoers_src" >/dev/null; then
             install -m 440 -o root -g root "$sudoers_src" "$sudoers_dst"
             log_success "Sudoers rules restored"
         else
@@ -995,6 +1017,7 @@ restore_instance() {
     if command -v restorecon >/dev/null 2>&1; then
         restorecon -R "${BF_BASE}/${name}" 2>/dev/null || true
     fi
+    selinux_label "${BF_BASE}/${name}"
 
     # The unit binds BFSMD to a fixed IP - flag it when restoring elsewhere.
     local bind_ip
@@ -1258,10 +1281,10 @@ ensure_patches() {
 ensure_python3() {
     command -v python3 >/dev/null 2>&1 && return 0
     local cmd=""
-    if command -v apt-get >/dev/null 2>&1; then cmd="apt-get install -y python3"
+    if command -v apt-get >/dev/null 2>&1; then cmd="apt-get -o DPkg::Lock::Timeout=300 install -y python3"
     elif command -v dnf >/dev/null 2>&1; then cmd="dnf install -y python3"
     elif command -v pacman >/dev/null 2>&1; then cmd="pacman -S --noconfirm --needed python"
-    elif command -v zypper >/dev/null 2>&1; then cmd="zypper --non-interactive install python3"
+    elif command -v zypper >/dev/null 2>&1; then cmd="env ZYPP_LOCK_TIMEOUT=300 zypper --non-interactive install python3"
     fi
     log_warn "python3 is needed for the binary patches and isn't installed."
     if [ -z "$cmd" ]; then

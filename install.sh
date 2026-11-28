@@ -64,6 +64,7 @@ case "$os_id" in
     centos)                  el_supported; installer="installers/centos/centos_stream9_bfsmd_setup.sh" ;;
     arch)                    installer="installers/arch/arch_bfsmd_setup.sh" ;;
     opensuse-*)              installer="installers/opensuse/opensuse_bfsmd_setup.sh" ;;
+    amzn)                    die "${PRETTY_NAME:-Amazon Linux} has no 32-bit (i686) packages, so Battlefield 1942 can't run on it. Use Debian, Ubuntu, Fedora, an EL 9 release or openSUSE (all available on AWS)." ;;
     *)
         # Derivatives: pick the closest family from ID_LIKE.
         if [[ "$os_like" == *" arch "* ]]; then

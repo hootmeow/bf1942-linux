@@ -1,7 +1,9 @@
 if [ ! -f "/etc/bf1942_deps_installed" ]; then
     log_info "First-time setup: Installing 32-bit libraries..."
 
-    ZYPPER=(zypper --non-interactive --gpg-auto-import-keys)
+    # ZYPP_LOCK_TIMEOUT: on desktop installs PackageKit often holds the zypp
+    # lock for a few minutes - wait for it instead of failing.
+    ZYPPER=(env ZYPP_LOCK_TIMEOUT=300 zypper --non-interactive --gpg-auto-import-keys)
     run_quiet "Refreshing repositories" "${ZYPPER[@]}" refresh
 
     # openSUSE ships 32-bit libraries as <name>-32bit (installed to /usr/lib),

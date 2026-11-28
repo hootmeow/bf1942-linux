@@ -29,8 +29,9 @@ LIBTINFO5_SHA="35375adcb232873346377aa7a4ce64483ab4858d3b0ec63c7cf8ec07d12e742f"
 LIBNCURSES5_SHA="80c6cae3f063fcccd5bdabc475692bbc3b0e43de5ad1e272a3d2b105cbccfc62"
 
 verify_sha256() {
-    local expected="$1" file="$2"
-    printf '%s  %s\n' "$expected" "$file" | sha256sum --check --status
+    local expected="$1" file="$2" actual
+    actual=$(sha256sum "$file" 2>/dev/null | awk '{print $1}') || return 1
+    [ -n "$actual" ] && [ "$actual" = "$expected" ]
 }
 
 accept_unverified_download() {
@@ -846,10 +847,10 @@ install_patches() {
 
     if ! command -v python3 >/dev/null 2>&1; then
         local -a py=()
-        if command -v apt-get >/dev/null 2>&1; then py=(apt-get install -y python3)
+        if command -v apt-get >/dev/null 2>&1; then py=(apt-get -o DPkg::Lock::Timeout=300 install -y python3)
         elif command -v dnf >/dev/null 2>&1; then py=(dnf install -y python3)
         elif command -v pacman >/dev/null 2>&1; then py=(pacman -S --needed --noconfirm python)
-        elif command -v zypper >/dev/null 2>&1; then py=(zypper --non-interactive install python3)
+        elif command -v zypper >/dev/null 2>&1; then py=(env ZYPP_LOCK_TIMEOUT=300 zypper --non-interactive install python3)
         fi
         if [ ${#py[@]} -eq 0 ]; then
             log_warn "python3 is needed for the patches and couldn't be installed automatically."
@@ -1534,8 +1535,18 @@ log_step "2/8: Installing system dependencies"
 if [ ! -f "/etc/bf1942_deps_installed" ]; then
     log_info "First-time setup: Installing i386 architecture and libraries..."
 
+    # Fresh cloud VMs run unattended-upgrades on first boot: wait for its
+    # dpkg lock instead of failing with "Could not get lock".
+    APT_LOCK=(-o DPkg::Lock::Timeout=300)
+
     dpkg --add-architecture i386
-    run_quiet "Updating package lists" apt-get update -y
+    run_quiet "Updating package lists" apt-get "${APT_LOCK[@]}" update -y
+
+    if ! apt-cache show libc6:i386 >/dev/null 2>&1; then
+        log_error "This release has no i386 (32-bit) packages - Battlefield 1942 can't run on it."
+        echo "  The server is a 32-bit program. Use a supported Ubuntu LTS (22.04 / 24.04 / 26.04) or Debian 12 / 13."
+        exit 1
+    fi
 
     # Ubuntu 24.04+ and Debian 13+ renamed libcurl4 to libcurl4t64 (64-bit
     # time_t ABI transition); older releases keep the original name.
@@ -1547,7 +1558,7 @@ if [ ! -f "/etc/bf1942_deps_installed" ]; then
     log_info "Using libcurl package: ${LIBCURL_PKG}"
 
     run_quiet "Installing 32-bit libraries" \
-        env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        env DEBIAN_FRONTEND=noninteractive apt-get "${APT_LOCK[@]}" install -y --no-install-recommends \
         libc6:i386 libstdc++6:i386 libgcc-s1:i386 \
         zlib1g:i386 "${LIBCURL_PKG}" libxext6:i386 \
         libx11-6:i386 libncurses6:i386 wget tar curl net-tools ufw
@@ -1908,7 +1919,7 @@ chmod 440 "$SUDOERS_TMP"
 if ! command -v visudo >/dev/null 2>&1; then
     install -m 440 -o root -g root "$SUDOERS_TMP" "$SUDOERS_FILE"
     log_warn "visudo not found - installed ${SUDOERS_FILE} without validation"
-elif visudo -cf "$SUDOERS_TMP" >/dev/null; then
+elif visudo -c -f "$SUDOERS_TMP" >/dev/null; then
     install -m 440 -o root -g root "$SUDOERS_TMP" "$SUDOERS_FILE"
     log_success "Sudoers configured (validated with visudo)"
 else

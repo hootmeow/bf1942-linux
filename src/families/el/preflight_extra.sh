@@ -11,3 +11,4 @@ if [[ "$EL_MAJOR" =~ ^[0-9]+$ ]] && [ "$EL_MAJOR" -ge 10 ]; then
     echo "  Fedora or openSUSE instead."
     exit 1
 fi
+#@include i386_check

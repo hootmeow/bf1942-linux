@@ -56,7 +56,7 @@ In **BFSMD mode** each instance is its own systemd service running BFSMD, which 
 
 Fedora has no LTS release; the RHEL 9 installer is the longer-support option.
 
-> ⚠️ **Not supported: Enterprise Linux 10** (RHEL / Rocky / AlmaLinux / CentOS Stream 10). EL 10 dropped every 32-bit (i686) package, and the BF1942 server is a 32-bit program, so it has nothing to run on. The installers and `install.sh` stop with an explanation instead of half-installing. Use an EL 9 release (supported until 2032) or another distro above.
+> ⚠️ **Not supported: Enterprise Linux 10** (RHEL / Rocky / AlmaLinux / CentOS Stream 10) **and Amazon Linux 2023.** Neither ships any 32-bit (i686) packages, and the BF1942 server is a 32-bit program, so it has nothing to run on. `install.sh` and the installers check for 32-bit package support before asking anything and stop with an explanation instead of half-installing. Use an EL 9 release (supported until 2032) or another distro above — on AWS, the Debian, Ubuntu, Rocky and openSUSE images all work.
 
 ---
 
@@ -164,7 +164,11 @@ Each instance automatically gets unique ports, its own systemd service, and dedi
 | Fedora 44 | `dnf` + `.i686` packages, firewalld, SELinux (`restorecon`), zlib-ng auto-detection |
 | RHEL 9 (+ Rocky / Alma / Oracle) | Same as Fedora + automatically enables EPEL and CRB repos |
 | CentOS Stream 9 | Same as RHEL 9 |
-| openSUSE Leap 16 / Tumbleweed | `zypper` + native `-32bit` packages (including `libncurses5`), firewalld, SELinux (`restorecon`) |
+| openSUSE Leap 16 / Tumbleweed | `zypper` + native `-32bit` packages (including `libncurses5`), firewalld, SELinux labelling |
+
+**Package locks:** a fresh cloud VM often runs automatic updates on first boot (and PackageKit holds the lock on desktop installs). The installers wait up to 5 minutes for the package manager instead of failing with *Could not get lock*.
+
+**SELinux** (Fedora, RHEL family, openSUSE): systemd may refuse to run programs stored in a home directory, so the installer labels the server folder `bin_t` with a persistent `semanage` rule (it installs `policycoreutils-python-utils` if needed). `bf1942_manager.sh restore` re-applies the label and `remove` deletes the rule.
 
 ---
 
@@ -429,6 +433,14 @@ The installer handles the server's own firewall; the router / cloud layer is you
 ---
 
 ## 🔧 Troubleshooting
+
+### Service Fails with `status=203/EXEC` (SELinux)
+SELinux is blocking systemd from running the server's files. Re-run the installer with `--repair` (it re-applies the label), or label the folder by hand:
+```bash
+sudo semanage fcontext -a -t bin_t "/home/bf1942_user/instances/server1(/.*)?"
+sudo restorecon -R /home/bf1942_user/instances/server1
+sudo systemctl restart bfsmd-server1
+```
 
 ### "Internal error!" in Logs
 Normal — BFSMD v2.0/v2.01 produces these continuously on modern kernels when reading `/proc`. The server works fine regardless. Filter them out with:

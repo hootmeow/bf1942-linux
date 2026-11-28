@@ -24,6 +24,8 @@
 #    --only <id,...>    apply only these patches (ids as listed, e.g. patch_ctf_respawn)
 #    --with-recorder    also binary-patch instances that run the replay recorder
 #    --yes, -y          do not ask for confirmation
+#    --summary          print "<instance> <patches needed>" per line, nothing else
+#                       (used by 'bf1942_manager.sh health')
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
@@ -47,7 +49,7 @@ log_warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_step()    { echo -e "${CYAN}${BOLD}>>>${NC} $1"; }
 
-usage() { sed -n '2,28p' "$0" | sed 's/^#  \{0,1\}//'; }
+usage() { sed -n '2,30p' "$0" | sed 's/^#  \{0,1\}//'; }
 
 # ---------------------------------------------------------------------------
 # Arguments
@@ -55,6 +57,7 @@ usage() { sed -n '2,28p' "$0" | sed 's/^#  \{0,1\}//'; }
 CHECK_ONLY=0
 ASSUME_YES=0
 WITH_RECORDER=0
+SUMMARY=0
 ONLY=""
 declare -a REQUESTED=()
 
@@ -63,6 +66,7 @@ while [ $# -gt 0 ]; do
         --check)         CHECK_ONLY=1 ;;
         --yes|-y)        ASSUME_YES=1 ;;
         --with-recorder) WITH_RECORDER=1 ;;
+        --summary)       SUMMARY=1 ;;
         --only)
             [ $# -ge 2 ] || { log_error "--only needs a comma-separated list of patch ids"; exit 1; }
             ONLY="$2"; shift ;;
@@ -114,6 +118,9 @@ if [ ${#BIN_PATCHES[@]} -eq 0 ] && [ ${#CONF_PATCHES[@]} -eq 0 ]; then
     log_error "No patches selected/found in ${PATCH_DIR}"
     exit 1
 fi
+if [ "$SUMMARY" -eq 1 ] && ! command -v python3 >/dev/null 2>&1; then
+    BIN_PATCHES=()   # summary: report what can be checked, don't fail
+fi
 if [ ${#BIN_PATCHES[@]} -gt 0 ] && ! command -v python3 >/dev/null 2>&1; then
     log_error "python3 is required for the binary patches (install it, or use --only to skip them)."
     exit 1
@@ -143,6 +150,7 @@ if [ -d "$BF_INSTANCES" ]; then
 fi
 
 if [ ${#INSTANCE_NAMES[@]} -eq 0 ]; then
+    [ "$SUMMARY" -eq 1 ] && exit 0
     log_error "No BF1942 instances found under ${BF_HOME}."
     exit 1
 fi
@@ -230,6 +238,17 @@ show_catalog() {
     fi
     echo ""
 }
+
+# ---------------------------------------------------------------------------
+# Machine-readable summary
+
+if [ "$SUMMARY" -eq 1 ]; then
+    for name in "${INSTANCE_NAMES[@]}"; do
+        inspect_instance "$name" >/dev/null
+        echo "$name $(( ${#NEEDED_BIN[@]} + ${#NEEDED_CONF[@]} ))"
+    done
+    exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # No targets: overview

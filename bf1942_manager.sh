@@ -6,12 +6,13 @@
 #    Manage multiple BF1942 server instances on a single machine
 #
 #  Usage: ./bf1942_manager.sh [command] [instance_name]
+#         ./bf1942_manager.sh          (no command: interactive menu)
 #
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
 
-VERSION="2.0"
+VERSION="2.1"
 
 BF_USER="bf1942_user"
 BF_BASE="/home/${BF_USER}/instances"
@@ -465,6 +466,7 @@ health_check() {
         log_success "All instances healthy"
     fi
     echo ""
+    patch_hint
 }
 
 # Security audit
@@ -1140,6 +1142,399 @@ restart_all() {
 }
 
 # Show usage
+# ---------------------------------------------------------------------------
+# Patches, replay recorder and self-update
+#
+# install.sh only downloads the installer and this manager, so the patches/
+# folder usually isn't on the server. When it isn't next to this script (a
+# git clone has it), the patch files are downloaded to PATCH_CACHE and kept
+# fresh from GitHub.
+# ---------------------------------------------------------------------------
+
+REPO_SLUG="hootmeow/bf1942-linux"
+REPO_REF="${BF1942_LINUX_REF:-main}"
+REPO_RAW="https://raw.githubusercontent.com/${REPO_SLUG}/${REPO_REF}"
+PATCH_CACHE="/opt/bf1942-linux/patches"
+SELF="$(readlink -f "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "$0")"
+SELF_DIR="$(dirname "$SELF")"
+# Used when the GitHub API can't list the folder.
+PATCH_FILES_DEFAULT="apply_patches.sh patch_ctf_flags_map.py patch_ctf_respawn.py patch-existing-logging.sh install-replay-recorder.sh"
+
+# Local patches/ (git clone) wins; otherwise the downloaded copy.
+patch_dir() {
+    if [ -f "${SELF_DIR}/patches/apply_patches.sh" ]; then
+        echo "${SELF_DIR}/patches"
+    else
+        echo "$PATCH_CACHE"
+    fi
+}
+
+patch_dir_is_cache() { [ "$(patch_dir)" = "$PATCH_CACHE" ]; }
+
+# Names of the files in the repo's patches/ folder (GitHub API), or the
+# built-in list if the API can't be reached.
+remote_patch_files() {
+    local names
+    names=$(curl -fsS --max-time 10 -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/${REPO_SLUG}/contents/patches?ref=${REPO_REF}" 2>/dev/null |
+        awk -F'"' '/"name":/ {print $4}' |
+        grep -E '^(apply_patches\.sh|patch[-_][A-Za-z0-9_-]+\.(sh|py)|install-[A-Za-z0-9_-]+\.sh)$' || true)
+    if [ -n "$names" ]; then
+        echo "$names"
+    else
+        tr ' ' '\n' <<< "$PATCH_FILES_DEFAULT"
+    fi
+}
+
+# Download (or refresh) the patch files into PATCH_CACHE.
+fetch_patches() {
+    require_root
+    command -v curl >/dev/null 2>&1 || { log_error "curl is required to download the patches."; return 1; }
+    if [[ ! "$REPO_REF" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+        log_error "BF1942_LINUX_REF contains unexpected characters: $REPO_REF"; return 1
+    fi
+    local files f tmp got=0 failed=0
+    files=$(remote_patch_files)
+    mkdir -p "$PATCH_CACHE"
+    chmod 755 "$PATCH_CACHE"
+    log_info "Downloading patches (${REPO_REF}) to ${PATCH_CACHE}..."
+    for f in $files; do
+        tmp="${PATCH_CACHE}/.${f}.part"
+        if curl -fsSL --retry 2 --max-time 60 -o "$tmp" "${REPO_RAW}/patches/${f}" &&
+           head -1 "$tmp" | grep -qE '^#!/usr/bin/env (bash|python3)'; then
+            chmod 755 "$tmp"
+            mv -f "$tmp" "${PATCH_CACHE}/${f}"
+            got=$((got + 1))
+        else
+            rm -f "$tmp"
+            log_warn "Could not download patches/${f}"
+            failed=$((failed + 1))
+        fi
+    done
+    # Drop patches that were removed upstream (only when the list came from
+    # GitHub - never on a failed download, which would empty the folder).
+    if [ "$got" -gt 0 ] && [ "$failed" -eq 0 ]; then
+        local have
+        for have in "$PATCH_CACHE"/*; do
+            [ -f "$have" ] || continue
+            f=$(basename "$have")
+            grep -qxF "$f" <<< "$files" || { rm -f "$have"; log_info "Removed ${f} (no longer in the repo)"; }
+        done
+    fi
+    if [ ! -f "${PATCH_CACHE}/apply_patches.sh" ]; then
+        log_error "Patch download failed - check your internet connection."
+        return 1
+    fi
+    date +%s > "${PATCH_CACHE}/.fetched"
+    if [ "$failed" -gt 0 ]; then
+        log_warn "Downloaded ${got} file(s), ${failed} failed."
+    else
+        log_success "Downloaded ${got} patch file(s)."
+    fi
+}
+
+# Make sure the patch files are present; refresh the downloaded copy once a
+# day. A failed refresh keeps using the files already there.
+ensure_patches() {
+    patch_dir_is_cache || return 0
+    local stamp age
+    if [ ! -f "${PATCH_CACHE}/apply_patches.sh" ]; then
+        fetch_patches
+        return
+    fi
+    stamp=$(cat "${PATCH_CACHE}/.fetched" 2>/dev/null || echo 0)
+    [[ "$stamp" =~ ^[0-9]+$ ]] || stamp=0
+    age=$(( $(date +%s) - stamp ))
+    if [ "$age" -gt 86400 ]; then
+        fetch_patches || log_warn "Using the patch files downloaded earlier."
+    fi
+    return 0
+}
+
+# The binary patches are Python. Offer to install it with the distro's
+# package manager rather than just failing.
+ensure_python3() {
+    command -v python3 >/dev/null 2>&1 && return 0
+    local cmd=""
+    if command -v apt-get >/dev/null 2>&1; then cmd="apt-get install -y python3"
+    elif command -v dnf >/dev/null 2>&1; then cmd="dnf install -y python3"
+    elif command -v pacman >/dev/null 2>&1; then cmd="pacman -S --noconfirm --needed python"
+    fi
+    log_warn "python3 is needed for the binary patches and isn't installed."
+    if [ -z "$cmd" ]; then
+        log_error "Install python3 with your package manager, then run this again."
+        return 1
+    fi
+    if [ -t 0 ]; then
+        local answer=""
+        read -r -p "Install it now (${cmd})? [Y/n] " answer || true
+        [[ "${answer:-y}" =~ ^[Yy] ]] || return 1
+    else
+        log_info "Installing python3 (${cmd})..."
+    fi
+    # shellcheck disable=SC2086
+    $cmd >/dev/null || { log_error "python3 install failed: ${cmd}"; return 1; }
+    log_success "python3 installed."
+}
+
+# bf1942_manager.sh patch [instances|all] [apply_patches.sh options]
+cmd_patch() {
+    require_root
+    ensure_patches || return 1
+    local dir; dir=$(patch_dir)
+    if ls "$dir"/patch_*.py >/dev/null 2>&1; then
+        ensure_python3 || return 1
+    fi
+    # The manager calls the standalone server 'default'; the runner, 'standalone'.
+    local -a args=()
+    local a
+    for a in "$@"; do
+        [ "$a" = "default" ] && a="standalone"
+        args+=("$a")
+    done
+    bash "${dir}/apply_patches.sh" "${args[@]}"
+}
+
+# bf1942_manager.sh recorder [install-replay-recorder.sh options]
+cmd_recorder() {
+    require_root
+    ensure_patches || return 1
+    local script; script="$(patch_dir)/install-replay-recorder.sh"
+    [ -f "$script" ] || { log_error "Replay recorder script not found: $script"; return 1; }
+    bash "$script" "$@"
+}
+
+# bf1942_manager.sh update - refresh this manager and the patch files.
+cmd_update() {
+    require_root
+    command -v curl >/dev/null 2>&1 || { log_error "curl is required."; return 1; }
+    if [ -d "${SELF_DIR}/.git" ]; then
+        log_info "This manager is in a git clone - update it with: git -C ${SELF_DIR} pull"
+        return 0
+    fi
+    local tmp new_ver
+    tmp="$(mktemp "${SELF_DIR}/.bf1942_manager.XXXXXX")" || { log_error "Can't write to ${SELF_DIR}"; return 1; }
+    log_info "Checking for a newer bf1942_manager.sh (${REPO_REF})..."
+    if ! curl -fsSL --retry 2 --max-time 60 -o "$tmp" "${REPO_RAW}/bf1942_manager.sh" ||
+       ! head -1 "$tmp" | grep -q '^#!/usr/bin/env bash' || ! bash -n "$tmp" 2>/dev/null; then
+        rm -f "$tmp"
+        log_error "Download failed or the file isn't a valid script - nothing changed."
+        return 1
+    fi
+    if cmp -s "$tmp" "$SELF"; then
+        rm -f "$tmp"
+        log_success "bf1942_manager.sh is up to date (v${VERSION})."
+    else
+        new_ver=$(sed -n 's/^VERSION="\(.*\)"/\1/p' "$tmp" | head -1)
+        chmod --reference="$SELF" "$tmp" 2>/dev/null || chmod 755 "$tmp"
+        chown --reference="$SELF" "$tmp" 2>/dev/null || true
+        # mv swaps in a new file: the copy bash is reading right now is untouched.
+        mv -f "$tmp" "$SELF"
+        log_success "bf1942_manager.sh updated: v${VERSION} -> v${new_ver:-?}"
+    fi
+    if patch_dir_is_cache; then
+        fetch_patches
+    else
+        log_info "Patches come from $(patch_dir) (git clone) - not downloaded."
+    fi
+}
+
+# Health-check footer: which instances have patches waiting. Uses only the
+# files already on disk (never downloads) and needs root to read binaries.
+patch_hint() {
+    [[ $EUID -eq 0 ]] || return 0
+    local dir; dir=$(patch_dir)
+    if [ ! -f "${dir}/apply_patches.sh" ]; then
+        echo -e "  ${BLUE}ℹ${NC} Bug-fix patches (CTF flag fixes) are available: sudo $0 patch"
+        echo ""
+        return 0
+    fi
+    local name count any=0
+    while read -r name count; do
+        [[ "$name" =~ ^[A-Za-z0-9_-]+$ && "$count" =~ ^[0-9]+$ ]] || continue
+        [ "$count" -gt 0 ] || continue
+        [ "$name" = "standalone" ] && name="default"
+        echo -e "  ${BLUE}ℹ${NC} ${name}: ${count} patch(es) available - sudo $0 patch ${name}"
+        any=1
+    done < <(timeout 60 bash "${dir}/apply_patches.sh" --summary 2>/dev/null || true)
+    [ "$any" -eq 1 ] && echo ""
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Interactive menu (no arguments, on a terminal)
+# ---------------------------------------------------------------------------
+
+menu_pause() { echo ""; read -r -p "Press Enter to continue..." _ || true; }
+
+# Run a command in a subshell so its 'exit' (errors, require_root) returns
+# to the menu instead of quitting it.
+menu_run() { ( "$@" ) || true; menu_pause; }
+
+menu_service() { if [ "$1" = "default" ]; then echo "bf1942.service"; else echo "bfsmd-$1.service"; fi; }
+
+# Fills MENU_NAMES with every instance that has a service.
+declare -a MENU_NAMES=()
+menu_instances() {
+    MENU_NAMES=()
+    if [ -d "$BF_STANDALONE" ] && service_exists "bf1942.service"; then
+        MENU_NAMES+=("default")
+    fi
+    local n
+    for n in $(get_instance_names); do
+        [ -n "$n" ] && service_exists "bfsmd-${n}.service" && MENU_NAMES+=("$n")
+    done
+    return 0
+}
+
+# One status line: service state plus a live game query when it's up.
+menu_status_line() {
+    local name="$1" svc ip port reply
+    svc=$(menu_service "$name")
+    if ! systemctl is-active --quiet "$svc"; then
+        echo -e "${RED}●${NC} stopped"
+        return 0
+    fi
+    if [ "$name" = "default" ]; then
+        ip="127.0.0.1"; port=23000
+    else
+        ip=$(get_bind_ip "$name"); port=$(get_ports "$name" | awk '{print $2}')
+    fi
+    if reply=$(query_server "$ip" "$port"); then
+        IFS='|' read -r q_host q_map q_players q_max <<< "$reply"
+        echo -e "${GREEN}●${NC} online    ${q_map}, ${q_players}/${q_max} players"
+    else
+        echo -e "${YELLOW}●${NC} running, game not answering yet"
+    fi
+}
+
+menu_server() {
+    local name="$1" c
+    while true; do
+        clear 2>/dev/null || true
+        echo -e "${BOLD}${name}${NC}   $(menu_status_line "$name")"
+        echo ""
+        echo "  1) Status            2) Start             3) Stop"
+        echo "  4) Restart           5) Live log          6) Config files"
+        if [ "$name" != "default" ]; then
+            echo "  7) Back up           8) Patches           9) Remove server"
+        else
+            echo "                       8) Patches"
+        fi
+        echo "  b) Back"
+        echo ""
+        read -r -p "Choose: " c || return 0
+        case "$c" in
+            1) menu_run show_status "$name" ;;
+            2) menu_run start_instance "$name" ;;
+            3) menu_run stop_instance "$name" ;;
+            4) menu_run restart_instance "$name" ;;
+            5) echo "Ctrl+C returns to the menu."; ( show_logs "$name" ) || true ;;
+            6) menu_run show_config "$name" ;;
+            7) [ "$name" = "default" ] || menu_run backup_instance "$name" ;;
+            8) menu_run cmd_patch "$name" ;;
+            9) if [ "$name" != "default" ]; then
+                   ( remove_instance "$name" ) || true
+                   menu_pause
+                   service_exists "$(menu_service "$name")" || return 0
+               fi ;;
+            b|B|"") return 0 ;;
+        esac
+    done
+}
+
+menu_patches() {
+    local c targets
+    while true; do
+        clear 2>/dev/null || true
+        echo -e "${BOLD}Bug-fix patches${NC}"
+        ( cmd_patch ) || true
+        echo "  a) Apply everything needed, on every server"
+        echo "  s) Apply to specific servers"
+        echo "  u) Re-download the latest patches"
+        echo "  b) Back"
+        echo ""
+        read -r -p "Choose: " c || return 0
+        case "$c" in
+            a|A) menu_run cmd_patch all ;;
+            s|S) read -r -p "Server names (space-separated, default = standalone): " targets || continue
+                 # shellcheck disable=SC2086
+                 [ -z "$targets" ] || menu_run cmd_patch $targets ;;
+            u|U) menu_run fetch_patches ;;
+            b|B|"") return 0 ;;
+        esac
+    done
+}
+
+menu_restore() {
+    local -a files=()
+    local f c i
+    for f in /root/bf1942_backups/*.tar.gz; do [ -f "$f" ] && files+=("$f"); done
+    if [ ${#files[@]} -eq 0 ]; then
+        log_warn "No backups in /root/bf1942_backups (or not readable - run with sudo)."
+        menu_pause; return 0
+    fi
+    echo -e "${BOLD}Backups${NC}"
+    for i in "${!files[@]}"; do printf "  %2d) %s\n" "$((i + 1))" "$(basename "${files[$i]}")"; done
+    read -r -p "Restore which? (Enter = cancel) " c || return 0
+    if [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -ge 1 ] && [ "$c" -le ${#files[@]} ]; then
+        menu_run restore_instance "${files[$((c - 1))]}"
+    fi
+}
+
+interactive_menu() {
+    # Ctrl+C stops the running command (e.g. a live log), not the menu.
+    trap ':' INT
+    local c i name
+    while true; do
+        clear 2>/dev/null || true
+        echo -e "${BOLD}BF1942 Server Manager v${VERSION}${NC}   ${CYAN}captheflag.com${NC}"
+        [[ $EUID -eq 0 ]] || echo -e "${YELLOW}Not root - start/stop, patches and backups need: sudo $0${NC}"
+        echo ""
+        menu_instances
+        if [ ${#MENU_NAMES[@]} -eq 0 ]; then
+            echo "  No servers installed yet. Create one with: sudo bash install.sh [name]"
+        else
+            for i in "${!MENU_NAMES[@]}"; do
+                name="${MENU_NAMES[$i]}"
+                printf "  ${BOLD}%2d)${NC} %-20s %s\n" "$((i + 1))" "$name" "$(menu_status_line "$name")"
+            done
+        fi
+        echo ""
+        echo "  h) Health check        p) Patches            r) Replay recorder (bfstats.io)"
+        echo "  l) Ports               x) Security audit     a) Start / stop / restart all"
+        echo "  k) Restore a backup    u) Update manager     ?) Command-line help"
+        echo "  q) Quit"
+        echo ""
+        read -r -p "Choose a server number or option: " c || { echo ""; break; }
+        case "$c" in
+            q|Q) break ;;
+            h|H) menu_run health_check ;;
+            p|P) menu_patches ;;
+            r|R) ( cmd_recorder ) || menu_pause ;;
+            l|L) menu_run show_ports ;;
+            x|X) menu_run security_audit ;;
+            a|A) read -r -p "Type start, stop or restart: " c || continue
+                 case "$c" in
+                     start)   menu_run start_all ;;
+                     stop)    menu_run stop_all ;;
+                     restart) menu_run restart_all ;;
+                 esac ;;
+            k|K) menu_restore ;;
+            u|U) if ( cmd_update ); then
+                     menu_pause
+                     exec bash "$SELF" menu   # run the menu from the updated file
+                 fi
+                 menu_pause ;;
+            \?) show_usage; menu_pause ;;
+            *) if [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -ge 1 ] && [ "$c" -le ${#MENU_NAMES[@]} ]; then
+                   menu_server "${MENU_NAMES[$((c - 1))]}"
+               fi ;;
+        esac
+    done
+    trap - INT
+}
+
 show_usage() {
     echo -e "${BOLD}BF1942 Multi-Instance Manager v${VERSION}${NC}
 
@@ -1162,6 +1557,10 @@ ${BOLD}Commands:${NC}
   ${CYAN}restart-all${NC}       - Restart all instances
   ${CYAN}logs${NC} <n>          - View logs for an instance (tail -f)
   ${CYAN}remove${NC} <n>        - Remove an instance (requires confirmation)
+  ${CYAN}patch${NC} [n|all]     - Bug-fix patches: status, or apply (downloads them if needed)
+  ${CYAN}recorder${NC}          - bfstats.io replay recorder: install / update / remove
+  ${CYAN}update${NC}            - Update this manager and the patch files
+  ${CYAN}menu${NC}              - Interactive menu (also: run with no command)
 
 ${BOLD}Examples:${NC}
   $0 list
@@ -1174,6 +1573,8 @@ ${BOLD}Examples:${NC}
   sudo $0 restart server1
   sudo $0 start-all
   sudo $0 remove server2
+  sudo $0 patch              # which servers need which patches
+  sudo $0 patch all          # apply them (add --check for a dry run)
 
 ${BOLD}Notes:${NC}
   - Commands that modify services require sudo
@@ -1281,7 +1682,28 @@ main() {
             fi
             remove_instance "$2"
             ;;
-        help|--help|-h|"")
+        patch)
+            shift
+            cmd_patch "$@"
+            ;;
+        recorder)
+            shift
+            cmd_recorder "$@"
+            ;;
+        update)
+            cmd_update
+            ;;
+        menu)
+            interactive_menu
+            ;;
+        "")
+            if [ -t 0 ] && [ -t 1 ]; then
+                interactive_menu
+            else
+                show_usage
+            fi
+            ;;
+        help|--help|-h)
             show_usage
             ;;
         *)

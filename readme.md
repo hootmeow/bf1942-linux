@@ -122,6 +122,7 @@ sudo ./<your-setup-script>.sh --yes --mode standalone
 | `--firewall` | `skip`, `open`, `tunnel`, `restrict=ADDR` | `skip`, or `tunnel` (game ports opened, management closed) when ufw/firewalld is already active |
 | `--name` | server-browser name, max 32 chars, no quotes/backslashes | `BF1942 <instance>` (standalone keeps the shipped name) |
 | `--repair` / `--reinstall` | flag | `--repair` when the instance already exists (see below) |
+| `--patches` / `--no-patches` | flag | Skipped; `--patches` applies the CTF bug fixes (see Applying Patches) during the install |
 | `--verbose`, `-v` | flag | Off; package output only goes to the install log |
 | `--allow-unverified-downloads` | flag | Off; supply it to continue after a hash warning |
 
@@ -206,6 +207,8 @@ The installer also saves a per-instance summary to `/root/.bf1942_credentials_<n
 
 `bf1942_manager.sh` lives at the repo root and manages all instances regardless of which distro installed them.
 
+**Interactive menu:** run it with no command (`sudo ./bf1942_manager.sh`) for a menu that shows every server live (online / stopped, map, players) and does everything below without remembering commands — start/stop, logs, backups and restores, bug-fix patches and the replay recorder. Ctrl+C stops a live log and returns to the menu.
+
 ```bash
 ./bf1942_manager.sh list                  # All instances and their status
 ./bf1942_manager.sh ports                 # All six ports of every instance
@@ -223,6 +226,11 @@ sudo ./bf1942_manager.sh stop-all
 sudo ./bf1942_manager.sh backup server1   # Full backup incl. systemd unit + sudoers
 sudo ./bf1942_manager.sh restore <file>   # Rebuild an instance from a backup (here or on a new machine)
 sudo ./bf1942_manager.sh remove server2   # Removes instance + its firewall rules (asks for confirmation)
+
+sudo ./bf1942_manager.sh patch            # Bug-fix patches: which servers need which (see Applying Patches)
+sudo ./bf1942_manager.sh patch all        # Apply them; or: patch server1, patch all --check
+sudo ./bf1942_manager.sh recorder         # bfstats.io replay recorder menu
+sudo ./bf1942_manager.sh update           # Update this manager and the patch files from GitHub
 ```
 
 **Health check:** `health` and `status` send a GameSpy `\status\` query to each instance's query port. A running systemd unit only proves BFSMD is up — the game server it launches can still be crashed, stuck loading, or refusing to start — so an instance only counts as healthy when the game itself answers (and you see its map and player count).
@@ -534,7 +542,17 @@ bf1942-linux/
 
 ## 🛠️ Applying Patches
 
-The `patches/` folder holds fixes for known server bugs. `apply_patches.sh` applies **all of them** in one go — you don't need to run each script by hand:
+The `patches/` folder holds fixes for known server bugs. The easiest way to apply them is the manager — it works on any server, even when you only downloaded the installer, because it fetches the patch files itself (to `/opt/bf1942-linux/patches`, refreshed daily) and installs `python3` if the binary patches need it:
+
+```bash
+sudo ./bf1942_manager.sh patch                    # overview: every instance x every patch (needed / applied)
+sudo ./bf1942_manager.sh patch all                # apply whatever is needed, on every instance
+sudo ./bf1942_manager.sh patch server1 --check    # report only ('default' = standalone server)
+```
+
+The installer also offers them near the end of a fresh install (answer *y*, or pass `--patches`), and `bf1942_manager.sh health` lists servers that still have patches waiting.
+
+From a git clone you can also run the patch runner directly — `apply_patches.sh` applies **all of them** in one go, no need to run each script by hand:
 
 ```bash
 sudo ./patches/apply_patches.sh                   # overview: every instance x every patch (needed / applied)

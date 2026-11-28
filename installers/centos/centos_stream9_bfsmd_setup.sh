@@ -801,6 +801,10 @@ Options:
                              --yes when the instance exists.
   --reinstall                Instance already installed: fresh server files
                              (the old settings folder is kept as a backup).
+  --patches / --no-patches   Apply the community CTF bug fixes to the server
+                             binary, or don't (asked when interactive; --yes
+                             alone skips them). Don't use with the bfstats.io
+                             replay recorder - it needs the unmodified binary.
   --yes, -y                  Never prompt: accept warnings/confirmations and
                              use the defaults above for anything not given.
   --verbose, -v              Show full package-manager output on screen (it
@@ -814,6 +818,58 @@ Options:
 Unattended example:
   sudo $0 server1 --yes --ip public --firewall tunnel
 EOF
+}
+
+# ------------------------------------------------------------
+# OPTIONAL BUG-FIX PATCHES
+# ------------------------------------------------------------
+# Same location bf1942_manager.sh uses, so 'bf1942_manager.sh patch' reuses
+# these files later instead of downloading them again.
+PATCH_CACHE="/opt/bf1942-linux/patches"
+PATCH_FILES="apply_patches.sh patch_ctf_flags_map.py patch_ctf_respawn.py patch-existing-logging.sh install-replay-recorder.sh"
+PATCH_RESULT=""
+
+# Download the patch files and apply them to this instance. Never fatal:
+# on any failure the server is left as installed (PATCH_RESULT=failed).
+install_patches() {
+    local ref="${BF1942_LINUX_REF:-main}" f tmp target
+    if [[ ! "$ref" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+        log_warn "BF1942_LINUX_REF has unexpected characters - patches skipped."
+        return 1
+    fi
+    local raw="https://raw.githubusercontent.com/hootmeow/bf1942-linux/${ref}/patches"
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        local -a py=()
+        if command -v apt-get >/dev/null 2>&1; then py=(apt-get install -y python3)
+        elif command -v dnf >/dev/null 2>&1; then py=(dnf install -y python3)
+        elif command -v pacman >/dev/null 2>&1; then py=(pacman -S --needed --noconfirm python)
+        fi
+        if [ ${#py[@]} -eq 0 ]; then
+            log_warn "python3 is needed for the patches and couldn't be installed automatically."
+            return 1
+        fi
+        run_quiet --soft "Installing python3 (for the patches)" "${py[@]}" || return 1
+    fi
+
+    mkdir -p "$PATCH_CACHE" && chmod 755 "$PATCH_CACHE" || return 1
+    for f in $PATCH_FILES; do
+        tmp="${PATCH_CACHE}/.${f}.part"
+        if curl -fsSL --retry 2 --max-time 60 -o "$tmp" "${raw}/${f}" &&
+           head -1 "$tmp" | grep -qE '^#!/usr/bin/env (bash|python3)'; then
+            chmod 755 "$tmp"
+            mv -f "$tmp" "${PATCH_CACHE}/${f}"
+        else
+            rm -f "$tmp"
+            log_warn "Couldn't download patches/${f} - patches skipped."
+            return 1
+        fi
+    done
+    date +%s > "${PATCH_CACHE}/.fetched"
+
+    target="$INSTANCE_NAME"
+    [ "$INSTALL_MODE" = "standalone" ] && target="standalone"
+    run_quiet --soft "Applying bug-fix patches" bash "${PATCH_CACHE}/apply_patches.sh" "$target" --yes
 }
 
 # Ask to continue past a warning; --yes always continues.
@@ -834,6 +890,7 @@ OPT_VERSION=""
 OPT_FIREWALL=""
 OPT_SERVER_NAME=""
 OPT_EXISTING=""
+OPT_PATCHES=""
 ASSUME_YES=0
 ALLOW_UNVERIFIED_DOWNLOADS=0
 ORIG_ARGS=""
@@ -863,6 +920,10 @@ while [ $# -gt 0 ]; do
             ;;
         --verbose|-v)
             VERBOSE=1
+            shift
+            ;;
+        --patches|--no-patches)
+            if [ "$1" = "--patches" ]; then OPT_PATCHES="yes"; else OPT_PATCHES="no"; fi
             shift
             ;;
         --allow-unverified-downloads)
@@ -1200,6 +1261,20 @@ elif [ -z "$SERVER_NAME" ]; then
     SERVER_NAME="$DEFAULT_SERVER_NAME"
 fi
 
+APPLY_PATCHES=0
+if [ "$OPT_PATCHES" = "yes" ]; then
+    APPLY_PATCHES=1
+elif [ -z "$OPT_PATCHES" ] && [ "$ASSUME_YES" -eq 0 ]; then
+    echo ""
+    echo -e " ${BOLD}Optional bug fixes${NC} for the server binary (uuuzbf/bf1942-patches):"
+    echo "   - a dropped CTF flag lands on buildings/bridges instead of falling through"
+    echo "   - the CTF flag's 30 s return timer resets every time it's picked up"
+    echo -e "   ${DIM}Skip these if you'll use the bfstats.io replay recorder (it needs the unmodified binary).${NC}"
+    echo -e "   ${DIM}You can apply them any time later with: sudo ./bf1942_manager.sh patch${NC}"
+    read -r -p "Apply them? [y/N] " patch_answer || true
+    [[ "${patch_answer:-}" =~ ^[yY] ]] && APPLY_PATCHES=1
+fi
+
 # ------------------------------------------------------------
 # SET PATHS AND PORTS
 # ------------------------------------------------------------
@@ -1362,6 +1437,11 @@ echo " Instance Name    : ${INSTANCE_NAME}"
 echo " Server Name      : ${SERVER_NAME:-(keep the default)}"
 echo " Install Path     : ${BF_ROOT}"
 echo " Service Name     : ${SERVICE_NAME}"
+if [ "$APPLY_PATCHES" -eq 1 ]; then
+    echo " Bug-fix patches  : apply (CTF flag fixes)"
+else
+    echo " Bug-fix patches  : skip"
+fi
 
 if [ "$INSTALL_MODE" = "bfsmd" ]; then
     echo ""
@@ -1845,6 +1925,19 @@ else
 fi
 rm -f "$SUDOERS_TMP"
 
+# Patch while the server is stopped (apply_patches.sh restarts it only
+# if it was running, e.g. on a repair).
+if [ "$APPLY_PATCHES" -eq 1 ]; then
+    echo ""
+    log_info "Bug-fix patches"
+    if install_patches; then
+        PATCH_RESULT="applied"
+    else
+        PATCH_RESULT="failed"
+        log_warn "The server is installed unpatched. Retry later: sudo ./bf1942_manager.sh patch"
+    fi
+fi
+
 # ------------------------------------------------------------
 # STEP 8: Start Service
 # ------------------------------------------------------------
@@ -2127,6 +2220,12 @@ if [ "$INSTALL_MODE" = "bfsmd" ]; then
     echo "   sudo $0 <name>     add another server"
 fi
 echo "   ${REPAIR_CMD}     fix this one later"
+case "$PATCH_RESULT" in
+    applied) ;;
+    failed)  echo -e "   sudo ./bf1942_manager.sh patch     ${YELLOW}patches failed - retry${NC}" ;;
+    *)       echo "   sudo ./bf1942_manager.sh patch     optional CTF bug fixes" ;;
+esac
+echo "   ./bf1942_manager.sh                interactive menu (patches, recorder, backups)"
 
 if [ "$INSTALL_MODE" = "bfsmd" ]; then
     echo ""

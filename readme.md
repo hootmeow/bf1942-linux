@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/bf1942-game-banner.webp" alt="Battlefield 1942 Linux Dedicated Server" width="100%">
+</p>
+
 # 🪖 Battlefield 1942 Dedicated Server (Linux)
 
 Automated setup for running **Battlefield 1942 Dedicated Servers** on modern 64-bit Linux with **multi-instance support**. Handles all dependency resolution (including legacy 32-bit libraries), user creation, systemd service setup, and firewall configuration in a single interactive script.
@@ -15,6 +19,22 @@ Automated setup for running **Battlefield 1942 Dedicated Servers** on modern 64-
 - **Firewall integration** — UFW on Debian/Ubuntu, firewalld on Fedora/RHEL/CentOS
 - **Systemd managed** — standard `systemctl` commands for all service control
 - **Shared management tool** — one `bf1942_manager.sh` at the repo root works across all distros
+
+### How it fits together
+
+```mermaid
+flowchart LR
+    players["🎮 Players"] -- "UDP game port<br/>14567 + ID" --> game
+    browsers["🌐 Server browsers<br/>and master lists"] -- "UDP query port<br/>23000 + ID" --> game
+    admin["🛠️ Your PC<br/>BF Remote Manager"] -- "TCP management port<br/>14667 + ID" --> bfsmd
+    subgraph host["Linux server · everything runs as bf1942_user"]
+        systemd["systemd<br/>bfsmd-#lt;name#gt;.service"] --> bfsmd["BFSMD<br/>server manager"]
+        bfsmd -- "starts, watches,<br/>restarts" --> game["bf1942_lnxded<br/>game server"]
+        systemd2["systemd<br/>bf1942.service"] -. "standalone mode<br/>(no BFSMD, no BFRM)" .-> game
+    end
+```
+
+In **BFSMD mode** each instance is its own systemd service running BFSMD, which launches the game server and lets you administer it remotely with BFRM. **Standalone mode** runs one game server directly under systemd on the stock ports. Each instance's ports are worked out from its ID — see [Automatic Port Allocation](#automatic-port-allocation).
 
 ---
 
@@ -338,7 +358,15 @@ The installer asks how to handle the management port:
 | Restrict to IP | Only your specified IP can connect | Static admin IP |
 | SSH tunnel | Port not opened at all; tunnel through SSH | Maximum security |
 
-**SSH tunnel example:**
+**SSH tunnel:** the management port stays closed in the firewall; BFRM reaches it through your SSH connection instead.
+
+```mermaid
+flowchart LR
+    bfrm["BFRM on your PC<br/>connect to localhost:14700"] --> client["ssh -L 14700:…:14700<br/>on your PC"]
+    client == "encrypted · TCP 22<br/>(only port it needs)" ==> sshd["sshd<br/>on the server"]
+    sshd --> bfsmd["BFSMD :14700<br/>firewall: closed"]
+```
+
 ```bash
 # On your local machine:
 ssh -L 14700:localhost:14700 user@your-server-ip
@@ -354,6 +382,19 @@ Checks process ownership, file permissions, default password still in use, and f
 ---
 
 ## 🌐 Network Scenarios
+
+Most servers sit behind something that filters traffic before it reaches the machine — a home router, or a cloud provider's firewall / security group. The game and query ports have to be allowed at **every** layer:
+
+```mermaid
+flowchart LR
+    players["🎮 Players<br/>connect to<br/>public IP : game port"] --> edge
+    edge["Router or cloud firewall<br/>forward / allow<br/>UDP game + query ports"] --> fw
+    subgraph server["Your server · private IP, e.g. 192.168.1.50 / 10.0.0.5"]
+        fw["UFW / firewalld<br/>(opened by the installer)"] --> game["BF1942 instance"]
+    end
+```
+
+The installer handles the server's own firewall; the router / cloud layer is yours to set up. Its final screen prints the exact ports and both addresses (public and private) to use.
 
 ### Home Server (Behind Router)
 - Choose **Local IP** during setup
@@ -519,7 +560,14 @@ For each instance the runner checks first and only touches instances that need s
 
 > ⚠️ **Replay recorder:** the bfstats.io recorder (`install-replay-recorder.sh`) only hooks the *unmodified* `bf1942_lnxded.static`. The runner therefore **skips binary patches on instances that have the recorder installed** — pass `--with-recorder` to patch them anyway (recordings will stop working on those instances).
 >
-> `install-replay-recorder.sh` always installs the **newest `recorder-v*` release** from [sila-skandia/bfstats](https://github.com/sila-skandia/bfstats/releases) and checks it against the release's `recorder.so.sha256`. Its status screen shows the installed version and flags when an update is available (re-run *Install / update*). Pin a version with `RECORDER_TAG=recorder-v0.3.0 sudo -E bash install-replay-recorder.sh`.
+> `install-replay-recorder.sh` always installs the **newest `recorder-v*` release** from [sila-skandia/bfstats](https://github.com/sila-skandia/bfstats/releases) and checks it against the release's `recorder.so.sha256`. Its menu shows each server's installed version, flags when a newer release is out, and offers **Update all**; each server also has a *Clean up old replays* option (replays otherwise grow forever). Pin a version with `sudo RECORDER_TAG=recorder-v0.3.0 bash install-replay-recorder.sh`.
+>
+> To keep recorders current and the disk in check without logging in, run it from cron — `--update` updates every installed recorder (keeping each server's on/off and sample-rate settings, restarting only servers that were running), and `--prune-replays N` deletes replays older than N days:
+>
+> ```bash
+> # /etc/cron.d/bf1942-recorder
+> 30 5 * * * root /path/to/patches/install-replay-recorder.sh --update --prune-replays 30 >> /var/log/bf1942-recorder.log 2>&1
+> ```
 
 ---
 
